@@ -21,11 +21,21 @@ export default defineConfig({
     chunkSizeWarningLimit: 1500,
     rollupOptions: {
       output: {
-        manualChunks: {
-          'vendor-react': ['react', 'react-dom'],
-          'vendor-firebase': ['firebase/app', 'firebase/auth', 'firebase/firestore'],
-          'vendor-pdf-excel': ['jspdf', 'jspdf-autotable', 'xlsx', 'pptxgenjs'],
-          'vendor-ui': ['lucide-react', 'sweetalert2', 'canvas-confetti', 'motion', 'recharts'],
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            if (id.includes('react') || id.includes('react-dom')) {
+              return 'vendor-react';
+            }
+            if (id.includes('firebase')) {
+              return 'vendor-firebase';
+            }
+            if (id.includes('jspdf') || id.includes('xlsx') || id.includes('pptxgenjs') || id.includes('html2canvas')) {
+              return 'vendor-pdf-excel';
+            }
+            if (id.includes('lucide-react') || id.includes('sweetalert2') || id.includes('canvas-confetti') || id.includes('motion') || id.includes('recharts')) {
+              return 'vendor-ui';
+            }
+          }
         },
       },
     },
