@@ -3,6 +3,7 @@ import * as XLSX from "xlsx";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import confetti from "canvas-confetti";
+import QRCode from "qrcode";
 import { 
   Gamepad2, 
   Play, 
@@ -521,17 +522,15 @@ export const KuisInteraktifView: React.FC<KuisInteraktifViewProps> = ({
   // Generate QR Code data url for PIN & Room
   useEffect(() => {
     if (activeKuis) {
-      import("qrcode").then((QRCode) => {
-        const joinInfo = JSON.stringify({
-          app: "EduAdmin-Kuis",
-          pin: activeKuis.pinCode,
-          judul: activeKuis.judul,
-          kelas: selectedKelas
-        });
-        QRCode.toDataURL(joinInfo, { width: 280, margin: 2 })
-          .then(setQrCodeDataUrl)
-          .catch(console.warn);
-      }).catch(console.warn);
+      const joinInfo = JSON.stringify({
+        app: "EduAdmin-Kuis",
+        pin: activeKuis.pinCode,
+        judul: activeKuis.judul,
+        kelas: selectedKelas
+      });
+      QRCode.toDataURL(joinInfo, { width: 280, margin: 2 })
+        .then(setQrCodeDataUrl)
+        .catch(console.warn);
     }
   }, [activeKuis, selectedKelas]);
 
