@@ -54,7 +54,7 @@ import {
   EkstrakurikulerItem,
   PrestasiItem 
 } from "../types";
-import { saveDocument, COLLECTIONS } from "../lib/firebase";
+import { saveDocument, batchSaveDocuments, COLLECTIONS } from "../lib/firebase";
 import { getAllowedClasses } from "../lib/accessControl";
 
 interface BukuIndukKelasViewProps {
@@ -488,21 +488,73 @@ export const BukuIndukKelasView: React.FC<BukuIndukKelasViewProps> = ({
     try {
       const data = await file.arrayBuffer();
       const workbook = XLSX.read(data, { type: "array" });
-      const firstSheetName = workbook.SheetNames[0];
-      const worksheet = workbook.Sheets[firstSheetName];
-      const rows: any[] = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
 
-      if (rows.length === 0) {
+      if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
+        alert("File Excel tidak memiliki lembar kerja (worksheet)!");
+        setIsImporting(false);
+        return;
+      }
+
+      const allRows: Array<{ row: any; sheetName: string }> = [];
+      workbook.SheetNames.forEach((sheetName) => {
+        const worksheet = workbook.Sheets[sheetName];
+        if (worksheet) {
+          const sheetRows: any[] = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
+          if (Array.isArray(sheetRows)) {
+            sheetRows.forEach((r) => allRows.push({ row: r, sheetName }));
+          }
+        }
+      });
+
+      if (allRows.length === 0) {
         alert("File Excel kosong atau format tidak sesuai!");
         setIsImporting(false);
         return;
       }
 
-      let successCount = 0;
+      const extractRowClass = (row: any, sheetName: string): string => {
+        const directClass = 
+          row["Kelas"] || 
+          row["kelas"] || 
+          row["KELAS"] || 
+          row["Rombel"] || 
+          row["rombel"] || 
+          row["ROMBEL"] || 
+          row["Rombongan Belajar"] || 
+          row["rombongan_belajar"] || 
+          row["RombonganBelajar"] || 
+          row["Tingkat"] || 
+          row["tingkat"] || 
+          row["Tingkat Kelas"] || 
+          row["Kelas / Rombel"] || 
+          row["Kelas/Rombel"] || 
+          row["masukDiKelas"] || 
+          row["Nama Kelas"] ||
+          row["nama_kelas"];
+
+        if (directClass && String(directClass).trim()) {
+          return String(directClass).trim();
+        }
+
+        const cleanSheet = (sheetName || "").trim();
+        if (
+          cleanSheet &&
+          !cleanSheet.toLowerCase().startsWith("sheet") &&
+          !cleanSheet.toLowerCase().includes("template") &&
+          !cleanSheet.toLowerCase().includes("buku_induk") &&
+          !cleanSheet.toLowerCase().includes("data_siswa")
+        ) {
+          return cleanSheet;
+        }
+
+        return selectedKelas !== "Semua" ? selectedKelas : "Kelas 1";
+      };
+
+      const recordsToSave: BukuIndukSiswa[] = [];
       const filteredMapel = mapelList.filter((m) => isStandardMapel(m.namaMapel));
 
-      for (let i = 0; i < rows.length; i++) {
-        const row = rows[i];
+      for (let i = 0; i < allRows.length; i++) {
+        const { row, sheetName } = allRows[i];
 
         const nis = String(row["NIS"] || row["nis"] || "").trim();
         const nisn = String(row["NISN"] || row["nisn"] || "").trim();
@@ -521,9 +573,7 @@ export const BukuIndukKelasView: React.FC<BukuIndukKelasViewProps> = ({
 
         const idSiswa = matchedSiswa ? matchedSiswa.id : `siswa_imp_${Date.now()}_${i}`;
         const docId = `bi_${idSiswa}`;
-        const kelas = String(
-          row["Kelas"] || row["masukDiKelas"] || matchedSiswa?.kelas || (selectedKelas !== "Semua" ? selectedKelas : "Kelas 1")
-        ).trim();
+        const kelas = extractRowClass(row, sheetName);
 
         const defaultNilaiMapel = filteredMapel.map((m) => ({
           idMapel: m.id,
@@ -643,11 +693,16 @@ export const BukuIndukKelasView: React.FC<BukuIndukKelasViewProps> = ({
           updatedAt: Date.now()
         };
 
-        await saveDocument(COLLECTIONS.BUKU_INDUK, record.id, record);
-        successCount++;
+        recordsToSave.push(record);
       }
 
-      alert(`Berhasil mengimpor ${successCount} data Buku Induk Siswa dari Excel!`);
+      if (recordsToSave.length > 0) {
+        await batchSaveDocuments(COLLECTIONS.BUKU_INDUK, recordsToSave);
+        const distinctClasses = Array.from(new Set(recordsToSave.map((r) => r.kelas)));
+        alert(`Berhasil mengimpor ${recordsToSave.length} data Buku Induk Siswa ke ${distinctClasses.length} kelas (${distinctClasses.join(", ")}) dari Excel!`);
+      } else {
+        alert("Tidak ada data siswa yang valid untuk diimpor.");
+      }
       setShowImportModal(false);
     } catch (err) {
       console.error(err);

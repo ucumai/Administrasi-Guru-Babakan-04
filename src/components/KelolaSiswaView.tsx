@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { Siswa, User, BukuIndukSiswa, Mapel, EkstrakurikulerItem } from "../types";
-import { saveDocument, deleteDocument, COLLECTIONS } from "../lib/firebase";
+import { saveDocument, deleteDocument, batchSaveDocuments, COLLECTIONS } from "../lib/firebase";
 import { getAllowedClasses, isRecordAllowedByClass } from "../lib/accessControl";
 import { 
   notifySimpanSuccess, 
@@ -694,38 +694,142 @@ export const KelolaSiswaView: React.FC<KelolaSiswaViewProps> = ({
       try {
         const buffer = evt.target?.result;
         const workbook = XLSX.read(buffer, { type: "binary" });
-        const sheetName = workbook.SheetNames[0];
-        const sheet = workbook.Sheets[sheetName];
-        const parsedData: any[] = XLSX.utils.sheet_to_json(sheet);
 
-        if (!parsedData || parsedData.length === 0) {
+        if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
+          notifySimpanError("Berkas Excel tidak memiliki lembar kerja (worksheet).");
+          return;
+        }
+
+        // 1. Baca seluruh worksheet / sheet yang ada di file Excel (tidak hanya sheet pertama)
+        const allParsedRows: Array<{ row: any; sheetName: string }> = [];
+        workbook.SheetNames.forEach((sheetName) => {
+          const sheet = workbook.Sheets[sheetName];
+          if (sheet) {
+            const sheetRows: any[] = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+            if (Array.isArray(sheetRows) && sheetRows.length > 0) {
+              sheetRows.forEach((r) => {
+                allParsedRows.push({ row: r, sheetName });
+              });
+            }
+          }
+        });
+
+        if (allParsedRows.length === 0) {
           notifySimpanError("Berkas Excel kosong atau format tidak sesuai.");
           return;
         }
 
-        let successCount = 0;
-        let skipped = 0;
+        // Helper deteksi kelas dari baris atau nama sheet
+        const extractRowClass = (row: any, sheetName: string): string => {
+          const directClass = 
+            row["Kelas"] || 
+            row["kelas"] || 
+            row["KELAS"] || 
+            row["Rombel"] || 
+            row["rombel"] || 
+            row["ROMBEL"] || 
+            row["Rombongan Belajar"] || 
+            row["rombongan_belajar"] || 
+            row["RombonganBelajar"] || 
+            row["Tingkat"] || 
+            row["tingkat"] || 
+            row["Tingkat Kelas"] || 
+            row["Kelas / Rombel"] || 
+            row["Kelas/Rombel"] || 
+            row["masukDiKelas"] || 
+            row["Nama Kelas"] ||
+            row["nama_kelas"] ||
+            row["Tingkat / Rombel"];
 
-        for (let idx = 0; idx < parsedData.length; idx++) {
-          const row = parsedData[idx];
-          const rowNisn = String(row["NISN"] || row["nisn"] || "").trim();
-          const rowNis = String(row["NIS"] || row["nis"] || "").trim();
-          const rowNama = String(row["Nama Lengkap"] || row["Nama Siswa"] || row["Nama"] || row["nama"] || "").trim();
-          let rowKelas = String(row["Kelas"] || row["kelas"] || "").trim();
-
-          if (currentUser?.role === "guru_kelas") {
-            rowKelas = currentUser.kelasUtama || rowKelas;
+          if (directClass && String(directClass).trim()) {
+            return String(directClass).trim();
           }
 
-          if (rowNisn && rowNama && rowKelas) {
-            const isDuplicate = siswaList.some((s) => s.nisn === rowNisn);
+          // Fallback: gunakan nama sheet jika nama sheet menunjukkan kelas (misal: "Kelas 1", "VII A", "1A")
+          const cleanSheet = (sheetName || "").trim();
+          if (
+            cleanSheet &&
+            !cleanSheet.toLowerCase().startsWith("sheet") &&
+            !cleanSheet.toLowerCase().includes("template") &&
+            !cleanSheet.toLowerCase().includes("buku_induk") &&
+            !cleanSheet.toLowerCase().includes("data_siswa")
+          ) {
+            return cleanSheet;
+          }
+
+          return "";
+        };
+
+        const siswaToSave: Siswa[] = [];
+        const bukuIndukToSave: BukuIndukSiswa[] = [];
+        const seenKeysInBatch = new Set<string>();
+        let skipped = 0;
+
+        for (let idx = 0; idx < allParsedRows.length; idx++) {
+          const { row, sheetName } = allParsedRows[idx];
+
+          const rowNama = String(
+            row["Nama Lengkap"] || 
+            row["Nama Siswa"] || 
+            row["Nama"] || 
+            row["nama"] || 
+            row["NAMA"] || 
+            row["Nama Peserta Didik"] || 
+            row["namaLengkap"] || 
+            ""
+          ).trim();
+
+          const rowNisn = String(
+            row["NISN"] || 
+            row["nisn"] || 
+            row["No. NISN"] || 
+            row["Nomor Induk Siswa Nasional"] || 
+            ""
+          ).trim();
+
+          const rowNis = String(
+            row["NIS"] || 
+            row["nis"] || 
+            row["NIPD"] || 
+            row["No. Induk"] || 
+            row["No Induk"] || 
+            row["Nomor Induk"] || 
+            ""
+          ).trim();
+
+          let rowKelas = extractRowClass(row, sheetName);
+
+          // Jika guru_kelas dan baris tidak menentukan kelas, gunakan kelasUtama
+          if (!rowKelas && currentUser?.role === "guru_kelas" && currentUser.kelasUtama) {
+            rowKelas = currentUser.kelasUtama;
+          }
+
+          // Fallback kelas terakhir jika masih kosong
+          if (!rowKelas) {
+            rowKelas = selectedKelasFilter || (allowedClasses.length > 0 ? allowedClasses[0] : "Kelas 1");
+          }
+
+          // Baris valid jika minimal memiliki Nama Siswa
+          if (rowNama) {
+            const uniqueKey = `${rowKelas.toLowerCase()}__${rowNama.toLowerCase()}__${rowNisn || rowNis || idx}`;
+
+            // Cek duplikasi dengan data yang sudah ada di database dan dalam batch import ini
+            const isDuplicate = 
+              siswaList.some((s) => {
+                if (rowNisn && s.nisn === rowNisn) return true;
+                if (rowNis && s.nis === rowNis && s.kelas.toLowerCase() === rowKelas.toLowerCase()) return true;
+                if (s.nama.toLowerCase() === rowNama.toLowerCase() && s.kelas.toLowerCase() === rowKelas.toLowerCase()) return true;
+                return false;
+              }) || seenKeysInBatch.has(uniqueKey);
+
             if (!isDuplicate) {
+              seenKeysInBatch.add(uniqueKey);
               const studentId = `sis_imp_${Date.now()}_${idx}`;
               const biDocId = `bi_${studentId}`;
 
               const newSiswa: Siswa = {
                 id: studentId,
-                nisn: rowNisn,
+                nisn: rowNisn || (rowNis ? `00${rowNis}` : `${Date.now()}${idx}`.slice(-10)),
                 nama: rowNama,
                 kelas: rowKelas,
                 nis: rowNis || undefined,
@@ -736,16 +840,16 @@ export const KelolaSiswaView: React.FC<KelolaSiswaViewProps> = ({
                 id: biDocId,
                 idSiswa: studentId,
                 nis: rowNis || "1001",
-                nisn: rowNisn,
+                nisn: newSiswa.nisn,
                 kelas: rowKelas,
 
                 pesertaDidik: {
                   namaLengkap: rowNama,
                   namaPanggilan: String(row["Nama Panggilan"] || rowNama.split(" ")[0] || ""),
-                  jenisKelamin: String(row["Jenis Kelamin (L/P)"] || row["Jenis Kelamin"] || "L").toUpperCase().startsWith("P") ? "P" : "L",
-                  tempatLahir: String(row["Tempat Lahir"] || "Bogor"),
-                  tanggalLahir: String(row["Tanggal Lahir (YYYY-MM-DD)"] || row["Tanggal Lahir"] || "2018-01-01"),
-                  nik: String(row["NIK Siswa"] || row["NIK"] || ""),
+                  jenisKelamin: String(row["Jenis Kelamin (L/P)"] || row["Jenis Kelamin"] || row["jenisKelamin"] || "L").toUpperCase().startsWith("P") ? "P" : "L",
+                  tempatLahir: String(row["Tempat Lahir"] || row["tempatLahir"] || "Bogor"),
+                  tanggalLahir: String(row["Tanggal Lahir (YYYY-MM-DD)"] || row["Tanggal Lahir"] || row["tanggalLahir"] || "2018-01-01"),
+                  nik: String(row["NIK Siswa"] || row["NIK"] || row["nik"] || ""),
                   kewarganegaraan: "Indonesia",
                   anakKe: "1",
                   jumlahSaudaraKandung: "0",
@@ -753,31 +857,31 @@ export const KelolaSiswaView: React.FC<KelolaSiswaViewProps> = ({
                   jumlahSaudaraAngkat: "0",
                   bahasaSehariHari: "Bahasa Indonesia",
                   golonganDarah: "O",
-                  alamat: String(row["Alamat"] || "Jl. Raya Babakan"),
+                  alamat: String(row["Alamat"] || row["alamat"] || "Jl. Raya Babakan"),
                   tempatTinggal: "Bersama Orang Tua",
                   jarakKeSekolah: "1 km"
                 },
 
                 orangTuaWali: {
-                  namaAyah: String(row["Nama Ayah"] || ""),
+                  namaAyah: String(row["Nama Ayah"] || row["namaAyah"] || ""),
                   tanggalLahirAyah: "",
-                  nikAyah: String(row["NIK Ayah"] || ""),
+                  nikAyah: String(row["NIK Ayah"] || row["nikAyah"] || ""),
                   pendidikanAyah: "SMA",
-                  pekerjaanAyah: String(row["Pekerjaan Ayah"] || "Karyawan Swasta"),
+                  pekerjaanAyah: String(row["Pekerjaan Ayah"] || row["pekerjaanAyah"] || "Karyawan Swasta"),
                   penghasilanAyah: "3.000.000 - 5.000.000",
                   agamaAyah: "Islam",
                   kewarganegaraanAyah: "Indonesia",
 
-                  namaIbu: String(row["Nama Ibu"] || ""),
+                  namaIbu: String(row["Nama Ibu"] || row["namaIbu"] || ""),
                   tanggalLahirIbu: "",
-                  nikIbu: String(row["NIK Ibu"] || ""),
+                  nikIbu: String(row["NIK Ibu"] || row["nikIbu"] || ""),
                   pendidikanIbu: "SMA",
-                  pekerjaanIbu: String(row["Pekerjaan Ibu"] || "Ibu Rumah Tangga"),
+                  pekerjaanIbu: String(row["Pekerjaan Ibu"] || row["pekerjaanIbu"] || "Ibu Rumah Tangga"),
                   penghasilanIbu: "-",
                   agamaIbu: "Islam",
                   kewarganegaraanIbu: "Indonesia",
 
-                  alamatOrangTua: String(row["Alamat"] || "Jl. Raya Babakan"),
+                  alamatOrangTua: String(row["Alamat"] || row["alamat"] || "Jl. Raya Babakan"),
 
                   namaWali: "",
                   hubunganKeluargaWali: "",
@@ -789,8 +893,8 @@ export const KelolaSiswaView: React.FC<KelolaSiswaViewProps> = ({
                 pendidikan: {
                   asalSiswa: "Siswa Baru / Dari TK",
                   masukDiKelas: rowKelas,
-                  asalSekolahTkPaud: String(row["Asal Sekolah TK/PAUD"] || "TK / PAUD"),
-                  diterimaTanggal: String(row["Tanggal Diterima"] || new Date().toISOString().split("T")[0]),
+                  asalSekolahTkPaud: String(row["Asal Sekolah TK/PAUD"] || row["asalSekolahTkPaud"] || "TK / PAUD"),
+                  diterimaTanggal: String(row["Tanggal Diterima"] || row["diterimaTanggal"] || new Date().toISOString().split("T")[0]),
                   pindahanMasukDiKelas: "",
                   pindahanAsalSekolah: "",
                   pindahanDiterimaTanggal: ""
@@ -842,22 +946,29 @@ export const KelolaSiswaView: React.FC<KelolaSiswaViewProps> = ({
                 updatedAt: Date.now()
               };
 
-              await saveDocument(COLLECTIONS.SISWA, studentId, newSiswa);
-              await saveDocument(COLLECTIONS.BUKU_INDUK, biDocId, newBukuInduk);
-              successCount++;
+              siswaToSave.push(newSiswa);
+              bukuIndukToSave.push(newBukuInduk);
             } else {
               skipped++;
             }
           }
         }
 
-        if (successCount > 0) {
-          notifySimpanSuccess(`Berhasil mengimpor ${successCount} siswa beserta Buku Induk! ${skipped > 0 ? `(${skipped} dilewati karena NISN duplikat)` : ""}`);
+        if (siswaToSave.length > 0) {
+          // Simpan serentak dengan batch write super cepat dan aman dari timeout
+          await batchSaveDocuments(COLLECTIONS.SISWA, siswaToSave);
+          await batchSaveDocuments(COLLECTIONS.BUKU_INDUK, bukuIndukToSave);
+
+          const distinctClasses = Array.from(new Set(siswaToSave.map((s) => s.kelas)));
+          notifySimpanSuccess(
+            `Berhasil mengimpor ${siswaToSave.length} siswa ke ${distinctClasses.length} kelas (${distinctClasses.join(", ")}) beserta Buku Induk! ${skipped > 0 ? `(${skipped} dilewati karena duplikat)` : ""}`
+          );
         } else {
-          notifySimpanError("Tidak ada data siswa baru yang diimpor. Semua NISN sudah ada dalam database.");
+          notifySimpanError("Tidak ada data siswa baru yang diimpor. Semua siswa sudah ada dalam database atau baris data kosong.");
         }
       } catch (err: any) {
-        notifySimpanError("Gagal membaca berkas Excel. Pastikan format kolom sesuai template.");
+        console.error(err);
+        notifySimpanError("Gagal membaca berkas Excel. Pastikan format file sesuai.");
       }
     };
     reader.readAsBinaryString(file);

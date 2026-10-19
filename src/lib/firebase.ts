@@ -482,14 +482,18 @@ export async function batchSaveDocuments(collectionName: string, items: Array<{ 
   } catch {}
 
   try {
-    const batch = writeBatch(firestore);
-    items.forEach((item) => {
-      const docRef = doc(firestore, collectionName, item.id);
-      const cleanData = sanitizeData({ ...item, updatedAt: Date.now() });
-      batch.set(docRef, cleanData, { merge: true });
-    });
-    await batch.commit();
-    recordServerWrite(items.length);
+    const CHUNK_SIZE = 400;
+    for (let i = 0; i < items.length; i += CHUNK_SIZE) {
+      const chunk = items.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(firestore);
+      chunk.forEach((item) => {
+        const docRef = doc(firestore, collectionName, item.id);
+        const cleanData = sanitizeData({ ...item, updatedAt: Date.now() });
+        batch.set(docRef, cleanData, { merge: true });
+      });
+      await batch.commit();
+      recordServerWrite(chunk.length);
+    }
   } catch (err: any) {
     const errMsg = err?.message || String(err);
     if (errMsg.toLowerCase().includes("quota") || err?.code === "resource-exhausted") {
