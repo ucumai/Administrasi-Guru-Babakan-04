@@ -41,7 +41,7 @@ export const KopSuratDinas: React.FC<KopSuratDinasProps> = ({
               src={config.Logo_Kiri}
               alt="Logo Kiri"
               style={{ height: `${logoHeight}px`, maxHeight: "90px" }}
-              className="object-contain"
+              className="object-contain bg-transparent p-0.5 rounded-sm"
             />
           ) : (
             <div className="w-16 h-16" />
@@ -73,7 +73,7 @@ export const KopSuratDinas: React.FC<KopSuratDinasProps> = ({
               src={config.Logo_Kanan}
               alt="Logo Kanan"
               style={{ height: `${logoHeight}px`, maxHeight: "90px" }}
-              className="object-contain"
+              className="object-contain bg-transparent p-0.5 rounded-sm"
             />
           ) : (
             <div className="w-16 h-16" />

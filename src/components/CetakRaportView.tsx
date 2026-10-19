@@ -74,6 +74,7 @@ interface CetakRaportViewProps {
   logAbsensiList: LogAbsensi[];
   bukuIndukList?: BukuIndukSiswa[];
   bankTpList?: BankTpItem[];
+  userList?: User[];
   config: Pengaturan;
   currentUser?: User | null;
   onNavigateToBankTp?: () => void;
@@ -296,6 +297,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
   logAbsensiList,
   bukuIndukList = [],
   bankTpList = [],
+  userList = [],
   config,
   currentUser,
   onNavigateToBankTp
@@ -1530,8 +1532,18 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
         status: "Naik Kelas",
         keKelas: nextClassStr
       } : undefined,
-      namaGuruWali: currentUser?.nama || config.Nama_Guru || "Eri Iriana Rifai, S.Kom.",
-      nipGuruWali: currentUser?.nip || config.NIP_Guru || "-",
+      namaGuruWali: (() => {
+        const matchedWali = userList.find(
+          (u) => u.role === "guru_kelas" && u.kelasUtama && u.kelasUtama.toLowerCase().trim() === siswa.kelas.toLowerCase().trim()
+        ) || userList.find((u) => u.role === "guru_kelas" || u.role === "admin");
+        return matchedWali?.nama || matchedWali?.name || config.Nama_Guru || currentUser?.nama || "Wali Kelas";
+      })(),
+      nipGuruWali: (() => {
+        const matchedWali = userList.find(
+          (u) => u.role === "guru_kelas" && u.kelasUtama && u.kelasUtama.toLowerCase().trim() === siswa.kelas.toLowerCase().trim()
+        ) || userList.find((u) => u.role === "guru_kelas" || u.role === "admin");
+        return matchedWali?.nip || config.NIP_Guru || "-";
+      })(),
       namaKepsek: config.Nama_Kepsek || "SUBUR, S.Pd.SD.",
       nipKepsek: config.NIP_Kepsek || "197002111993081001"
     };
@@ -3048,7 +3060,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
                               <img 
                                 src={config.Logo_Kiri} 
                                 alt="Logo Sekolah" 
-                                className="w-24 h-24 object-contain"
+                                className="w-24 h-24 object-contain bg-white p-1 rounded-lg shadow-2xs"
                               />
                             ) : (
                               <div className="w-24 h-24 rounded-full border-4 border-blue-900 flex items-center justify-center bg-blue-50 text-blue-900 shadow-inner">
@@ -3067,29 +3079,29 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
 
                           {/* Student Identitas Box */}
                           <div className="max-w-md mx-auto w-full border border-slate-400 p-4 rounded-lg bg-slate-50/50 space-y-2 text-left text-xs sm:text-sm">
-                            <div className="flex">
-                              <span className="w-36 font-semibold text-slate-600">Nama Siswa</span>
-                              <span className="mr-2">:</span>
+                            <div className="grid grid-cols-[130px_12px_1fr] items-baseline">
+                              <span className="font-semibold text-slate-600">Nama Siswa</span>
+                              <span>:</span>
                               <strong className="font-bold text-slate-900 uppercase">{student.nama}</strong>
                             </div>
-                            <div className="flex">
-                              <span className="w-36 font-semibold text-slate-600">NISN / NIS</span>
-                              <span className="mr-2">:</span>
+                            <div className="grid grid-cols-[130px_12px_1fr] items-baseline">
+                              <span className="font-semibold text-slate-600">NISN / NIS</span>
+                              <span>:</span>
                               <span className="font-semibold text-slate-800">{student.nisn || "-"} / {student.nis || "-"}</span>
                             </div>
-                            <div className="flex">
-                              <span className="w-36 font-semibold text-slate-600">Kelas / Fase</span>
-                              <span className="mr-2">:</span>
+                            <div className="grid grid-cols-[130px_12px_1fr] items-baseline">
+                              <span className="font-semibold text-slate-600">Kelas / Fase</span>
+                              <span>:</span>
                               <span className="font-semibold text-slate-800">{student.kelas} / {studentRaport.fase}</span>
                             </div>
-                            <div className="flex">
-                              <span className="w-36 font-semibold text-slate-600">Nama Sekolah</span>
-                              <span className="mr-2">:</span>
+                            <div className="grid grid-cols-[130px_12px_1fr] items-baseline">
+                              <span className="font-semibold text-slate-600">Nama Sekolah</span>
+                              <span>:</span>
                               <span className="font-bold text-slate-900">{config.Nama_Sekolah || "SD NEGERI BABAKAN 04"}</span>
                             </div>
-                            <div className="flex">
-                              <span className="w-36 font-semibold text-slate-600">NPSN</span>
-                              <span className="mr-2">:</span>
+                            <div className="grid grid-cols-[130px_12px_1fr] items-baseline">
+                              <span className="font-semibold text-slate-600">NPSN</span>
+                              <span>:</span>
                               <span className="font-semibold text-slate-800">{config.NPSN || "20200889"}</span>
                             </div>
                           </div>

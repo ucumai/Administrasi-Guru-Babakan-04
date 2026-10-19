@@ -598,6 +598,7 @@ export default function App() {
               logAbsensiList={absensiList}
               bukuIndukList={bukuIndukList}
               bankTpList={bankTpList}
+              userList={userList}
               config={config}
               currentUser={currentUser}
               onNavigateToBankTp={() => handleTabChange("bank_tp")}
