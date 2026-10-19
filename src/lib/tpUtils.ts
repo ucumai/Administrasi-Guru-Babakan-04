@@ -148,8 +148,9 @@ export function cleanTpText(text: string, mapelFallback: string = ""): string {
 }
 
 /**
- * Filter Bank TP Items using 3 criteria: Mapel, Kelas/Fase, and Semester
- * Ensures 100% relevant descriptions with multi-tiered fallback
+ * Flexible Subject & Class Matching
+ * Memperluas logika pencocokan nama mapel dan kelas agar seluruh entri TP yang ada
+ * di Bank TP untuk mapel tersebut 100% langsung ditarik dan digabungkan secara lengkap.
  */
 export function filterBankTpItems(
   bankTpList: BankTpItem[],
@@ -159,80 +160,112 @@ export function filterBankTpItems(
 ): BankTpItem[] {
   if (!bankTpList || bankTpList.length === 0) return [];
 
+  const rawMapel = (mapel || "").toLowerCase().replace(/[^a-z0-9]/g, "");
   const mapelLower = (mapel || "").toLowerCase().trim();
   const kelasLower = (kelas || "").toLowerCase().trim();
   const rawSem = (semester || "").toLowerCase().trim();
   const semLower = rawSem.includes("genap") || rawSem === "2" ? "genap" : rawSem.includes("ganjil") || rawSem === "1" ? "ganjil" : rawSem;
   const targetFase = getFaseByClass(kelas).toLowerCase().trim();
 
-  // Extract class numeric digits if any (e.g. "Kelas 4" -> "4")
-  const classDigits = (kelasLower.match(/\d+/) || [""])[0];
+  // Extract class numeric digits if any (e.g. "Kelas 4" -> "4", "IV" -> "4")
+  let classDigits = (kelasLower.match(/\d+/) || [""])[0];
+  if (!classDigits) {
+    if (kelasLower.includes("i ") || kelasLower === "i" || kelasLower.includes("satu")) classDigits = "1";
+    else if (kelasLower.includes("ii") || kelasLower.includes("dua")) classDigits = "2";
+    else if (kelasLower.includes("iii") || kelasLower.includes("tiga")) classDigits = "3";
+    else if (kelasLower.includes("iv") || kelasLower.includes("empat")) classDigits = "4";
+    else if (kelasLower.includes("v") || kelasLower.includes("lima")) classDigits = "5";
+    else if (kelasLower.includes("vi") || kelasLower.includes("enam")) classDigits = "6";
+  }
 
-  // 1. Filter by Mapel
+  // 1. Flexible Subject Matching
   const mapelMatches = bankTpList.filter((item) => {
     const itemMapel = (item.mapel || "").toLowerCase().trim();
+    const rawItemMapel = itemMapel.replace(/[^a-z0-9]/g, "");
+
     if (itemMapel === mapelLower || itemMapel.includes(mapelLower) || mapelLower.includes(itemMapel)) return true;
-    if (mapelLower.includes("ipas") && itemMapel.includes("ipas")) return true;
-    if (mapelLower.includes("pancasila") && (itemMapel.includes("pancasila") || itemMapel.includes("ppkn"))) return true;
-    if (mapelLower.includes("matematika") && (itemMapel.includes("matematika") || itemMapel.includes("mtk"))) return true;
-    if (mapelLower.includes("agama") && (itemMapel.includes("agama") || itemMapel.includes("paibp") || itemMapel.includes("pabp"))) return true;
-    if (mapelLower.includes("pjok") && (itemMapel.includes("pjok") || itemMapel.includes("olahraga") || itemMapel.includes("penjas"))) return true;
-    if (mapelLower.includes("seni") && (itemMapel.includes("seni") || itemMapel.includes("sbdp"))) return true;
-    if (mapelLower.includes("inggris") && (itemMapel.includes("inggris") || itemMapel.includes("english"))) return true;
-    if (mapelLower.includes("daerah") && (itemMapel.includes("daerah") || itemMapel.includes("sunda") || itemMapel.includes("jawa") || itemMapel.includes("mulok"))) return true;
+    if (rawItemMapel && (rawMapel.includes(rawItemMapel) || rawItemMapel.includes(rawMapel))) return true;
+
+    // Subject aliases
+    if (mapelLower.includes("matematika") || mapelLower.includes("mtk") || rawMapel.includes("matematika") || rawMapel.includes("mtk")) {
+      return itemMapel.includes("matematika") || itemMapel.includes("mtk") || rawItemMapel.includes("matematika") || rawItemMapel.includes("mtk");
+    }
+    if (mapelLower.includes("indo") || rawMapel.includes("indo")) {
+      return itemMapel.includes("indo") || rawItemMapel.includes("indo");
+    }
+    if (mapelLower.includes("ipas") || mapelLower.includes("ipa") || mapelLower.includes("ips") || rawMapel.includes("ipas")) {
+      return itemMapel.includes("ipas") || itemMapel.includes("ipa") || itemMapel.includes("ips") || rawItemMapel.includes("ipas");
+    }
+    if (mapelLower.includes("pancasila") || mapelLower.includes("ppkn") || mapelLower.includes("pkn") || rawMapel.includes("pancasila") || rawMapel.includes("ppkn")) {
+      return itemMapel.includes("pancasila") || itemMapel.includes("ppkn") || itemMapel.includes("pkn") || rawItemMapel.includes("pancasila") || rawItemMapel.includes("ppkn");
+    }
+    if (mapelLower.includes("agama") || mapelLower.includes("paibp") || mapelLower.includes("pabp") || mapelLower.includes("pai") || mapelLower.includes("islam") || mapelLower.includes("kristen") || mapelLower.includes("katolik")) {
+      return itemMapel.includes("agama") || itemMapel.includes("paibp") || itemMapel.includes("pabp") || itemMapel.includes("pai") || itemMapel.includes("islam") || rawItemMapel.includes("agama") || rawItemMapel.includes("paibp") || rawItemMapel.includes("pabp");
+    }
+    if (mapelLower.includes("pjok") || mapelLower.includes("olahraga") || mapelLower.includes("penjas") || rawMapel.includes("pjok")) {
+      return itemMapel.includes("pjok") || itemMapel.includes("olahraga") || itemMapel.includes("penjas") || rawItemMapel.includes("pjok");
+    }
+    if (mapelLower.includes("seni") || mapelLower.includes("sbdp") || mapelLower.includes("prakarya") || rawMapel.includes("seni") || rawMapel.includes("sbdp")) {
+      return itemMapel.includes("seni") || itemMapel.includes("sbdp") || itemMapel.includes("prakarya") || rawItemMapel.includes("seni") || rawItemMapel.includes("sbdp");
+    }
+    if (mapelLower.includes("inggris") || mapelLower.includes("english") || rawMapel.includes("inggris") || rawMapel.includes("english")) {
+      return itemMapel.includes("inggris") || itemMapel.includes("english") || rawItemMapel.includes("inggris") || rawItemMapel.includes("english");
+    }
+    if (mapelLower.includes("daerah") || mapelLower.includes("mulok") || mapelLower.includes("muatan lokal") || mapelLower.includes("sunda") || mapelLower.includes("jawa")) {
+      return itemMapel.includes("daerah") || itemMapel.includes("mulok") || itemMapel.includes("muatan lokal") || itemMapel.includes("sunda") || itemMapel.includes("jawa");
+    }
+    if (mapelLower.includes("tematik") || mapelLower.includes("guru kelas") || rawMapel.includes("tematik")) {
+      return itemMapel.includes("tematik") || itemMapel.includes("guru kelas") || rawItemMapel.includes("tematik");
+    }
+
     return false;
   });
 
   if (mapelMatches.length === 0) return [];
 
-  // 2. Filter by Semester (if specified and not "semua")
+  // 2. Flexible Semester Matching
   let semesterFiltered = mapelMatches;
   if (semLower && semLower !== "semua") {
     const exactSem = mapelMatches.filter((item) => {
       const itemSem = (item.semester || "").toLowerCase().trim();
-      return itemSem === semLower || (semLower === "ganjil" && (itemSem.includes("ganjil") || itemSem === "1")) || (semLower === "genap" && (itemSem.includes("genap") || itemSem === "2"));
+      return (
+        itemSem === semLower ||
+        (semLower === "ganjil" && (itemSem.includes("ganjil") || itemSem === "1")) ||
+        (semLower === "genap" && (itemSem.includes("genap") || itemSem === "2"))
+      );
     });
-    // If exact semester matches exist, prefer them; otherwise allow "semua"
+    // If exact semester matches exist, include them and any general/all-semester TPs
     if (exactSem.length > 0) {
-      semesterFiltered = exactSem;
-    } else {
-      semesterFiltered = mapelMatches.filter((item) => {
+      const allSemItems = mapelMatches.filter((item) => {
         const itemSem = (item.semester || "").toLowerCase().trim();
         return !item.semester || itemSem === "semua" || itemSem === "semua semester" || itemSem === "";
       });
-      if (semesterFiltered.length === 0) semesterFiltered = mapelMatches;
+      semesterFiltered = [...exactSem, ...allSemItems];
     }
   }
 
-  // 3. Filter by Kelas / Fase
-  // Tier A: Exact class number match (e.g. both refer to class 4)
-  if (classDigits) {
-    const exactClassItems = semesterFiltered.filter((item) => {
-      const itemK = (item.kelas || "").toLowerCase().trim();
-      const itemDigits = (itemK.match(/\d+/) || [""])[0];
-      return itemDigits === classDigits;
-    });
-    if (exactClassItems.length > 0) {
-      return exactClassItems;
-    }
-  }
+  // 3. Flexible Class & Fase Matching
+  // Collect all matching items for this class (exact class number match, matching fase, or generic/all classes)
+  const classMatches: BankTpItem[] = [];
 
-  // Tier B: Fase match (e.g. Fase B for Kelas 3 & 4)
-  const faseItems = semesterFiltered.filter((item) => {
-    const itemFase = (item.fase || "").toLowerCase().trim();
-    return itemFase && itemFase === targetFase;
-  });
-  if (faseItems.length > 0) {
-    return faseItems;
-  }
-
-  // Tier C: "Semua Kelas" or generic items
-  const genericItems = semesterFiltered.filter((item) => {
+  semesterFiltered.forEach((item) => {
     const itemK = (item.kelas || "").toLowerCase().trim();
-    return !item.kelas || itemK === "semua kelas" || itemK === "semua" || itemK === "";
+    const itemDigits = (itemK.match(/\d+/) || [""])[0];
+    const itemFase = (item.fase || "").toLowerCase().trim();
+    const isSemuaKelas = !item.kelas || itemK === "semua kelas" || itemK === "semua" || itemK === "" || itemK === "semua fase";
+
+    const isExactClass = classDigits && (itemDigits === classDigits || itemK === kelasLower || itemK.includes(kelasLower) || kelasLower.includes(itemK));
+    const isFaseMatch = itemFase && targetFase && itemFase === targetFase;
+
+    if (isExactClass || isFaseMatch || isSemuaKelas) {
+      if (!classMatches.some((existing) => existing.id === item.id)) {
+        classMatches.push(item);
+      }
+    }
   });
-  if (genericItems.length > 0) {
-    return genericItems;
+
+  if (classMatches.length > 0) {
+    return classMatches;
   }
 
   // Fallback to all matching mapel & semester items

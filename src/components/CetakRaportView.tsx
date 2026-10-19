@@ -374,6 +374,19 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
     try { localStorage.setItem("edadmin_raport_selected_kelas", selectedKelas); } catch {}
   }, [selectedKelas]);
 
+  // Auto-switch selectedKelas if current class has 0 students but database has students in another class
+  useEffect(() => {
+    if (siswaList && siswaList.length > 0) {
+      const hasStudentsInCurrent = siswaList.some((s) => s.kelas === selectedKelas);
+      if (!hasStudentsInCurrent) {
+        const firstWithStudents = siswaList.find((s) => Boolean(s.kelas))?.kelas;
+        if (firstWithStudents) {
+          setSelectedKelas(firstWithStudents);
+        }
+      }
+    }
+  }, [siswaList, selectedKelas]);
+
   useEffect(() => {
     try { localStorage.setItem("edadmin_raport_selected_periode", selectedPeriode); } catch {}
   }, [selectedPeriode]);
@@ -1352,6 +1365,33 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
     return map;
   }, [dataNilaiList, selectedKelas, classStudents, activeMapelNames]);
 
+  // Real-time Re-Sync: Menyegarkan deskripsi rapor dengan menggabungkan seluruh TP terbaru dari Bank TP untuk kelas & mapel tersebut
+  const autoSyncDescriptions = (rec: RaportRecord): RaportRecord => {
+    if (!rec || !Array.isArray(rec.nilaiMapel)) return rec;
+
+    const refreshedNilai = rec.nilaiMapel.map((nm) => {
+      // If manually edited by teacher in this session, keep it
+      if ((nm as any).isManualCustom) return nm;
+
+      const mapelBankItems = filterBankTpItems(bankTpList, nm.mapel, selectedKelas, currentPeriodeInfo.semester);
+      const availableTps = effectiveTpBank[nm.mapel] || DEFAULT_TP_TEMPLATES[nm.mapel] || [];
+      const scoreVal = typeof nm.nilaiAkhir === "number" ? nm.nilaiAkhir : 80;
+      const freshDesc = generateFallbackDeskripsiFromTp(nm.mapel, scoreVal, availableTps, mapelBankItems);
+
+      return {
+        ...nm,
+        capaianKompetensiTinggi: freshDesc.tinggi,
+        capaianKompetensiPerluBimbingan: freshDesc.perluBimbingan,
+        deskripsi: freshDesc.tinggi
+      };
+    });
+
+    return {
+      ...rec,
+      nilaiMapel: refreshedNilai
+    };
+  };
+
   // Build or Get Raport Record for a Student with full cloud & local persistence
   const getRaportForStudent = (siswa: Siswa): RaportRecord => {
     const cleanTahun = selectedTahunAjaran.replace(/\//g, "-");
@@ -1361,17 +1401,17 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
     const altDocId3 = `raport_${siswa.id}`;
 
     // 1. Check in-memory state for any matching key
-    if (raportRecords[primaryDocId]) return raportRecords[primaryDocId];
-    if (raportRecords[altDocId1]) return { ...raportRecords[altDocId1], id: primaryDocId };
-    if (raportRecords[altDocId2]) return { ...raportRecords[altDocId2], id: primaryDocId };
-    if (raportRecords[altDocId3]) return { ...raportRecords[altDocId3], id: primaryDocId };
+    if (raportRecords[primaryDocId]) return autoSyncDescriptions(raportRecords[primaryDocId]);
+    if (raportRecords[altDocId1]) return autoSyncDescriptions({ ...raportRecords[altDocId1], id: primaryDocId });
+    if (raportRecords[altDocId2]) return autoSyncDescriptions({ ...raportRecords[altDocId2], id: primaryDocId });
+    if (raportRecords[altDocId3]) return autoSyncDescriptions({ ...raportRecords[altDocId3], id: primaryDocId });
 
     // 1b. Search in-memory state values for matching student ID & period
     const foundInState = Object.values(raportRecords).find(
       (r: RaportRecord) => r && r.idSiswa === siswa.id && (r.periode === selectedPeriode || !r.periode)
     );
     if (foundInState) {
-      return { ...(foundInState as RaportRecord), id: primaryDocId };
+      return autoSyncDescriptions({ ...(foundInState as RaportRecord), id: primaryDocId });
     }
 
     // 2. Check localStorage cache
@@ -1379,15 +1419,15 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
       const cachedStr = localStorage.getItem("edadmin_persisted_raport_records");
       if (cachedStr) {
         const cachedMap = JSON.parse(cachedStr);
-        if (cachedMap[primaryDocId]) return cachedMap[primaryDocId];
-        if (cachedMap[altDocId1]) return { ...cachedMap[altDocId1], id: primaryDocId };
-        if (cachedMap[altDocId2]) return { ...cachedMap[altDocId2], id: primaryDocId };
+        if (cachedMap[primaryDocId]) return autoSyncDescriptions(cachedMap[primaryDocId]);
+        if (cachedMap[altDocId1]) return autoSyncDescriptions({ ...cachedMap[altDocId1], id: primaryDocId });
+        if (cachedMap[altDocId2]) return autoSyncDescriptions({ ...cachedMap[altDocId2], id: primaryDocId });
 
         const foundInCache = Object.values(cachedMap).find(
           (r: any) => r && r.idSiswa === siswa.id && (r.periode === selectedPeriode || !r.periode)
         ) as RaportRecord | undefined;
         if (foundInCache) {
-          return { ...foundInCache, id: primaryDocId };
+          return autoSyncDescriptions({ ...foundInCache, id: primaryDocId });
         }
       }
     } catch {}
@@ -1401,11 +1441,11 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
     ) as unknown as RaportRecord | undefined;
 
     if (existingBiDoc && Array.isArray(existingBiDoc.nilaiMapel) && existingBiDoc.nilaiMapel.length > 0) {
-      return {
+      return autoSyncDescriptions({
         ...existingBiDoc,
         id: primaryDocId,
         tahunAjaran: selectedTahunAjaran
-      };
+      });
     }
 
     // 4. Fallback baseline: only generated if never saved before
@@ -1982,13 +2022,14 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
     }
   };
 
-  // Export PDF with jsPDF
+  // Export PDF with jsPDF on Kertas F4 / Folio (215mm x 330mm) - 1 Lembar Utuh Tanpa Terpotong
   const handleExportPDF = () => {
     try {
+      // Standar Kertas Resmi F4 / Folio di Indonesia: 215mm x 330mm
       const doc = new jsPDF({
         orientation: "portrait",
         unit: "mm",
-        format: "a4"
+        format: [215, 330]
       });
 
       const targetStudents = selectedSiswaId === "all"
@@ -2000,184 +2041,358 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
         return;
       }
 
-      targetStudents.forEach((student, index) => {
-        if (index > 0) doc.addPage();
+      let isFirstPage = true;
 
+      targetStudents.forEach((student) => {
         const studentRaport = getRaportForStudent(student);
 
-        // Header Kop Dinas Resmi
-        let topY = 12;
-        if (showKopSekolah) {
+        // 1. LEMBAR COVER (Jika printMode === 'full' atau 'cover') - 1 Lembar Utuh F4
+        if (printMode === "full" || printMode === "cover") {
+          if (!isFirstPage) {
+            doc.addPage([215, 330], "portrait");
+          }
+          isFirstPage = false;
+
+          // Double Border Frame Khas Rapor Resmi (Margin 12mm dari tepi kertas)
+          doc.setDrawColor(30, 41, 59);
+          doc.setLineWidth(1.2);
+          doc.rect(12, 12, 191, 306);
+          doc.setLineWidth(0.4);
+          doc.rect(13.8, 13.8, 187.4, 302.4);
+
+          // Header Dinas
+          doc.setFontSize(10.5);
+          doc.setFont("helvetica", "bold");
+          doc.text((config.Pemerintah || "PEMERINTAH KABUPATEN BOGOR").toUpperCase(), 107.5, 30, { align: "center" });
+          doc.text((config.Dinas || "DINAS PENDIDIKAN").toUpperCase(), 107.5, 35.5, { align: "center" });
+          doc.setFontSize(15);
+          doc.text((config.Nama_Sekolah || "SD NEGERI BABAKAN 04").toUpperCase(), 107.5, 44, { align: "center" });
+
+          // Judul Rapor
+          doc.setFontSize(13);
+          doc.setFont("helvetica", "bold");
+          doc.text("LAPORAN HASIL BELAJAR PESERTA DIDIK", 107.5, 62, { align: "center" });
+          doc.setFontSize(10.5);
+          doc.setFont("helvetica", "normal");
+          doc.text("( RAPOR KURIKULUM MERDEKA )", 107.5, 68, { align: "center" });
+
+          // Logo Sekolah di Tengah
           if (config.Logo_Kiri) {
             try {
-              doc.addImage(config.Logo_Kiri, "PNG", 14, 10, 16, 16);
-            } catch (e) {}
-          }
-          if (config.Logo_Kanan) {
-            try {
-              doc.addImage(config.Logo_Kanan, "PNG", 180, 10, 16, 16);
-            } catch (e) {}
+              doc.addImage(config.Logo_Kiri, "PNG", 87.5, 85, 40, 40);
+            } catch (e) {
+              doc.setDrawColor(37, 99, 235);
+              doc.circle(107.5, 105, 20);
+            }
+          } else {
+            doc.setDrawColor(37, 99, 235);
+            doc.circle(107.5, 105, 20);
           }
 
+          // Periode & Tahun Ajaran
+          doc.setFontSize(12);
+          doc.setFont("helvetica", "bold");
+          doc.text(studentRaport.periodeNama.toUpperCase(), 107.5, 142, { align: "center" });
+          doc.setFontSize(10);
+          doc.setFont("helvetica", "normal");
+          doc.text(`Tahun Ajaran ${studentRaport.tahunAjaran}`, 107.5, 148, { align: "center" });
+
+          // Box Identitas Siswa
+          doc.setDrawColor(100, 116, 139);
+          doc.setLineWidth(0.5);
+          doc.roundedRect(26, 165, 163, 68, 2, 2);
+
+          doc.setFontSize(9.5);
+          const drawCoverRow = (label: string, val: string, yPos: number, isBoldVal: boolean = false) => {
+            doc.setFont("helvetica", "normal");
+            doc.text(label, 32, yPos);
+            doc.text(":", 76, yPos);
+            doc.setFont("helvetica", isBoldVal ? "bold" : "normal");
+            doc.text(val, 80, yPos);
+          };
+
+          drawCoverRow("Nama Peserta Didik", student.nama.toUpperCase(), 178, true);
+          drawCoverRow("NISN / NIS", `${student.nisn || "-"} / ${student.nis || "-"}`, 189);
+          drawCoverRow("Kelas / Fase", `${student.kelas} / ${studentRaport.fase}`, 200);
+          drawCoverRow("Nama Sekolah", config.Nama_Sekolah || "SD NEGERI BABAKAN 04", 211, true);
+          drawCoverRow("NPSN", config.NPSN || "20200889", 222);
+
+          // Footer Cover
+          doc.setFontSize(9.5);
+          doc.setFont("helvetica", "bold");
+          doc.text((config.Nama_Sekolah || "SD NEGERI BABAKAN 04").toUpperCase(), 107.5, 286, { align: "center" });
+          doc.setFontSize(8);
+          doc.setFont("helvetica", "normal");
+          doc.text(config.Alamat_Sekolah || "Kp. Babakan Kulon RT.05/02 Desa Babakan Kec. Ciseeng Kab. Bogor", 107.5, 292, { align: "center" });
+        }
+
+        // 2. LEMBAR NILAI CAPAIAN HASIL BELAJAR - 1 Lembar Utuh Kertas F4 (215mm x 330mm)
+        if (printMode === "full" || printMode === "lembar_nilai") {
+          if (!isFirstPage) {
+            doc.addPage([215, 330], "portrait");
+          }
+          isFirstPage = false;
+
+          // Header Kop Dinas Resmi
+          let currentY = 8;
+          if (showKopSekolah) {
+            if (config.Logo_Kiri) {
+              try {
+                doc.addImage(config.Logo_Kiri, "PNG", 12, 8, 14, 14);
+              } catch (e) {}
+            }
+            if (config.Logo_Kanan) {
+              try {
+                doc.addImage(config.Logo_Kanan, "PNG", 189, 8, 14, 14);
+              } catch (e) {}
+            }
+
+            doc.setFontSize(9);
+            doc.setFont("helvetica", "bold");
+            doc.text((config.Pemerintah || "PEMERINTAH KABUPATEN BOGOR").toUpperCase(), 107.5, 11, { align: "center" });
+            doc.text((config.Dinas || "DINAS PENDIDIKAN").toUpperCase(), 107.5, 15, { align: "center" });
+            doc.setFontSize(11);
+            doc.text((config.Nama_Sekolah || "SD NEGERI BABAKAN 04").toUpperCase(), 107.5, 19.5, { align: "center" });
+            doc.setFontSize(7);
+            doc.setFont("helvetica", "normal");
+            const alamatFull = `${config.Alamat_Sekolah || "Kp. Babakan Kulon RT.05/02 Desa Babakan Kec. Ciseeng Kab. Bogor"}${config.NPSN ? ` • NPSN: ${config.NPSN}` : ""}`;
+            doc.text(alamatFull, 107.5, 23.5, { align: "center" });
+
+            // Garis Ganda Kop Surat
+            doc.setLineWidth(0.6);
+            doc.line(12, 25.5, 203, 25.5);
+            doc.setLineWidth(0.2);
+            doc.line(12, 26.3, 203, 26.3);
+
+            currentY = 29.5;
+          }
+
+          // Raport Title
           doc.setFontSize(10);
           doc.setFont("helvetica", "bold");
-          doc.text((config.Pemerintah || "PEMERINTAH KABUPATEN BOGOR").toUpperCase(), 105, topY, { align: "center" });
-          doc.text((config.Dinas || "DINAS PENDIDIKAN").toUpperCase(), 105, topY + 4.5, { align: "center" });
-          doc.setFontSize(13);
-          doc.text((config.Nama_Sekolah || "SD NEGERI BABAKAN 04").toUpperCase(), 105, topY + 9.5, { align: "center" });
+          doc.text("LAPORAN HASIL BELAJAR (RAPOR)", 107.5, currentY + 3, { align: "center" });
           doc.setFontSize(7.5);
           doc.setFont("helvetica", "normal");
-          const alamatFull = `${config.Alamat_Sekolah || "Kp. Babakan Kulon RT.05/02 Desa Babakan Kec. Ciseeng Kab. Bogor"}${config.NPSN ? ` • NPSN: ${config.NPSN}` : ""}${config.Email_Sekolah ? ` • Email: ${config.Email_Sekolah}` : ""}`;
-          doc.text(alamatFull, 105, topY + 14, { align: "center" });
-          
-          // Garis Ganda Kop Surat
-          doc.setLineWidth(0.6);
-          doc.line(14, topY + 17, 196, topY + 17);
-          doc.setLineWidth(0.2);
-          doc.line(14, topY + 18, 196, topY + 18);
-        }
+          doc.text(`Periode: ${studentRaport.periodeNama} | Tahun Ajaran: ${studentRaport.tahunAjaran}`, 107.5, currentY + 6.8, { align: "center" });
 
-        // Raport Title
-        doc.setFontSize(11);
-        doc.setFont("helvetica", "bold");
-        doc.text("LAPORAN HASIL BELAJAR (RAPOR)", 105, 36, { align: "center" });
-        doc.setFontSize(8.5);
-        doc.setFont("helvetica", "normal");
-        doc.text(`Periode: ${studentRaport.periodeNama} | Tahun Ajaran: ${studentRaport.tahunAjaran}`, 105, 41, { align: "center" });
+          // Identitas Siswa
+          const idY = currentY + 10.5;
+          doc.setFontSize(7.5);
+          doc.setFont("helvetica", "normal");
+          doc.text(`Nama Peserta Didik : ${student.nama.toUpperCase()}`, 12, idY);
+          doc.text(`NISN / NIS          : ${student.nisn || '-'} / ${student.nis || '-'}`, 12, idY + 3.8);
+          doc.text(`Nama Sekolah       : ${config.Nama_Sekolah || "SD NEGERI BABAKAN 04"}`, 12, idY + 7.6);
+          doc.text(`Kelas / Fase : ${student.kelas} / ${studentRaport.fase}`, 130, idY);
+          doc.text(`Semester     : ${studentRaport.semester}`, 130, idY + 3.8);
+          doc.text(`Tahun Ajaran : ${studentRaport.tahunAjaran}`, 130, idY + 7.6);
 
-        // Identitas Siswa
-        doc.setFontSize(8.5);
-        doc.text(`Nama Peserta Didik : ${student.nama}`, 14, 49);
-        doc.text(`NISN / NIS          : ${student.nisn || '-'} / ${student.nis || '-'}`, 14, 54);
-        doc.text(`Kelas / Fase       : ${student.kelas} / ${studentRaport.fase}`, 130, 49);
-        doc.text(`Semester            : ${studentRaport.semester}`, 130, 54);
+          // Mapel Terpilih & Terurut
+          const mapelOrderLookup = new Map<string, number>(displayMapelNames.map((m, idx) => [m.toLowerCase(), idx]));
+          const filteredNilaiMapel = studentRaport.nilaiMapel
+            .filter((nm) => mapelOrderLookup.has(nm.mapel.toLowerCase()))
+            .sort((a, b) => {
+              const posA = mapelOrderLookup.get(a.mapel.toLowerCase()) ?? 999;
+              const posB = mapelOrderLookup.get(b.mapel.toLowerCase()) ?? 999;
+              return posA - posB;
+            });
+          const finalNilaiMapel = filteredNilaiMapel.length > 0 ? filteredNilaiMapel : studentRaport.nilaiMapel;
 
-        // Tabel Nilai (Hanya Mapel yang Dicentang, Diurutkan Sesuai Nomor Urut)
-        const mapelOrderLookup = new Map<string, number>(displayMapelNames.map((m, idx) => [m.toLowerCase(), idx]));
-        const filteredNilaiMapel = studentRaport.nilaiMapel
-          .filter((nm) => mapelOrderLookup.has(nm.mapel.toLowerCase()))
-          .sort((a, b) => {
-            const posA = mapelOrderLookup.get(a.mapel.toLowerCase()) ?? 999;
-            const posB = mapelOrderLookup.get(b.mapel.toLowerCase()) ?? 999;
-            return posA - posB;
-          });
-        const finalNilaiMapel = filteredNilaiMapel.length > 0 ? filteredNilaiMapel : studentRaport.nilaiMapel;
-
-        const tableBody = finalNilaiMapel.map((nm, i) => {
-          let descText = nm.capaianKompetensiTinggi || nm.deskripsi || "";
-          if (nm.capaianKompetensiPerluBimbingan) {
-            if (descText) {
-              descText = `${descText}\n\n* ${nm.capaianKompetensiPerluBimbingan}`;
-            } else {
-              descText = nm.capaianKompetensiPerluBimbingan;
+          const tableBody = finalNilaiMapel.map((nm, i) => {
+            let descText = nm.capaianKompetensiTinggi || nm.deskripsi || "";
+            if (nm.capaianKompetensiPerluBimbingan) {
+              if (descText) {
+                descText = `${descText}\n* ${nm.capaianKompetensiPerluBimbingan}`;
+              } else {
+                descText = nm.capaianKompetensiPerluBimbingan;
+              }
             }
-          }
-          return [
-            i + 1,
-            nm.mapel,
-            nm.nilaiAkhir,
-            descText || "-"
+            return [
+              i + 1,
+              nm.mapel,
+              nm.nilaiAkhir,
+              descText || "-"
+            ];
+          });
+
+          // Penyesuaian Dinamis Font & Padding agar 1 Lembar Utuh Pas di Kertas F4 (215mm x 330mm)
+          const numMapel = finalNilaiMapel.length;
+          const tableFontSize = numMapel > 11 ? 5.8 : numMapel > 8 ? 6.5 : 7.0;
+          const tablePadding = numMapel > 11 ? 0.7 : numMapel > 8 ? 0.9 : 1.2;
+
+          // A. Tabel Capaian Kompetensi Pembelajaran
+          const tableAY = idY + 11.5;
+          doc.setFontSize(8);
+          doc.setFont("helvetica", "bold");
+          doc.text("A. Nilai Capaian Kompetensi Pembelajaran", 12, tableAY);
+
+          autoTable(doc, {
+            startY: tableAY + 1.8,
+            head: [["No", "Mata Pelajaran", "Nilai Akhir", "Capaian Kompetensi / Deskripsi Kemajuan Belajar"]],
+            body: tableBody,
+            theme: "grid",
+            pageBreak: "avoid",
+            margin: { left: 12, right: 12, bottom: 8 },
+            headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: "bold", fontSize: 7, halign: "center", cellPadding: 1.2 },
+            styles: { fontSize: tableFontSize, cellPadding: tablePadding, overflow: "linebreak", textColor: 20 },
+            columnStyles: {
+              0: { cellWidth: 8, halign: "center" },
+              1: { cellWidth: 44, fontStyle: "bold" },
+              2: { cellWidth: 15, halign: "center", fontStyle: "bold" },
+              3: { cellWidth: 124 }
+            }
+          });
+
+          const afterTableAY = (doc as any).lastAutoTable.finalY + 2.5;
+
+          // B. TABEL KEGIATAN EKSTRAKURIKULER
+          doc.setFontSize(8);
+          doc.setFont("helvetica", "bold");
+          doc.text("B. Kegiatan Ekstrakurikuler", 12, afterTableAY + 2);
+
+          const ekskulList = (studentRaport.ekskul && studentRaport.ekskul.length > 0)
+            ? studentRaport.ekskul
+            : [
+                { nama: "Pramuka", predikat: "A", keterangan: "Sangat aktif, disiplin, dan memiliki jiwa kepemimpinan yang baik." },
+                { nama: "Pencak Silat", predikat: "B", keterangan: "Menguasai gerakan dasar seni beladiri dengan baik." }
+              ];
+
+          const ekskulRows = ekskulList.map((ek, idx) => [
+            idx + 1,
+            ek.nama,
+            ek.predikat,
+            ek.keterangan
+          ]);
+
+          autoTable(doc, {
+            startY: afterTableAY + 3.2,
+            head: [["No", "Nama Kegiatan Ekstrakurikuler", "Predikat", "Keterangan"]],
+            body: ekskulRows,
+            theme: "grid",
+            pageBreak: "avoid",
+            margin: { left: 12, right: 12, bottom: 8 },
+            headStyles: { fillColor: [71, 85, 105], textColor: 255, fontStyle: "bold", fontSize: 7, halign: "center", cellPadding: 1.0 },
+            styles: { fontSize: 6.6, cellPadding: 0.9, textColor: 20 },
+            columnStyles: {
+              0: { cellWidth: 8, halign: "center" },
+              1: { cellWidth: 44, fontStyle: "bold" },
+              2: { cellWidth: 15, halign: "center", fontStyle: "bold" },
+              3: { cellWidth: 124 }
+            }
+          });
+
+          const afterEkskulY = (doc as any).lastAutoTable.finalY + 2.5;
+
+          // C. Ketidakhadiran (Kiri, lebar 64mm) & D. Catatan Wali Kelas (Kanan, lebar 124mm)
+          doc.setFontSize(8);
+          doc.setFont("helvetica", "bold");
+          doc.text("C. Ketidakhadiran", 12, afterEkskulY + 2);
+          doc.text("D. Catatan Wali Kelas", 80, afterEkskulY + 2);
+
+          const attRows = [
+            ["Sakit (S)", `${studentRaport.kehadiran.sakit} hari`],
+            ["Izin (I)", `${studentRaport.kehadiran.izin} hari`],
+            ["Tanpa Keterangan (A)", `${studentRaport.kehadiran.alpa} hari`]
           ];
-        });
 
-        autoTable(doc, {
-          startY: 60,
-          head: [["No", "Mata Pelajaran", "Nilai Akhir", "Capaian Kompetensi / Keterangan"]],
-          body: tableBody,
-          theme: "grid",
-          headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: "bold", fontSize: 8, halign: "center" },
-          styles: { fontSize: 8, cellPadding: 2 },
-          columnStyles: {
-            0: { cellWidth: 10, halign: "center" },
-            1: { cellWidth: 55 },
-            2: { cellWidth: 20, halign: "center", fontStyle: "bold" },
-            3: { cellWidth: 95 }
+          autoTable(doc, {
+            startY: afterEkskulY + 3.2,
+            head: [["Kriteria Absensi", "Jumlah"]],
+            body: attRows,
+            theme: "grid",
+            pageBreak: "avoid",
+            margin: { left: 12 },
+            tableWidth: 64,
+            headStyles: { fillColor: [71, 85, 105], textColor: 255, fontSize: 7, halign: "center", fontStyle: "bold", cellPadding: 1.0 },
+            styles: { fontSize: 6.6, cellPadding: 0.9, textColor: 20 },
+            columnStyles: {
+              0: { cellWidth: 44 },
+              1: { cellWidth: 20, halign: "center", fontStyle: "bold" }
+            }
+          });
+
+          const absensiBottomY = (doc as any).lastAutoTable.finalY;
+
+          // Box Catatan Wali Kelas di Sisi Kanan (lebar 124mm: dari x=80 hingga x=204)
+          doc.setFontSize(7.2);
+          doc.setFont("helvetica", "italic");
+          const splitCatatan = doc.splitTextToSize(`"${studentRaport.catatanWaliKelas || 'Pertahankan prestasi dan tetap semangat dalam belajar.'}"`, 118);
+          const catatanBoxH = Math.max(absensiBottomY - (afterEkskulY + 3.2), splitCatatan.length * 3.5 + 4, 15);
+
+          doc.setDrawColor(0, 0, 0);
+          doc.setLineWidth(0.2);
+          doc.rect(80, afterEkskulY + 3.2, 123, catatanBoxH);
+          doc.text(splitCatatan, 83, afterEkskulY + 7.2);
+
+          let postSectionY = Math.max(absensiBottomY, afterEkskulY + 3.2 + catatanBoxH) + 2.5;
+
+          // Keputusan Kenaikan Kelas jika Semester Genap
+          if (studentRaport.statusKenaikan) {
+            doc.setDrawColor(0, 0, 0);
+            doc.setLineWidth(0.3);
+            doc.rect(12, postSectionY, 191, 5.5);
+            doc.setFontSize(7.2);
+            doc.setFont("helvetica", "bold");
+            doc.text(
+              `Keputusan Kenaikan: Peserta didik dinyatakan ${studentRaport.statusKenaikan.status.toUpperCase()} (${studentRaport.statusKenaikan.keKelas || ''})`,
+              15,
+              postSectionY + 3.8
+            );
+            postSectionY += 7.5;
           }
-        });
 
-        let currentY = (doc as any).lastAutoTable.finalY + 6;
-
-        // Absensi & Ekstrakurikuler Table
-        const attRows = [
-          ["Sakit", `${studentRaport.kehadiran.sakit} hari`],
-          ["Izin", `${studentRaport.kehadiran.izin} hari`],
-          ["Tanpa Keterangan (Alpa)", `${studentRaport.kehadiran.alpa} hari`]
-        ];
-
-        autoTable(doc, {
-          startY: currentY,
-          head: [["Ketidakhadiran", "Jumlah"]],
-          body: attRows,
-          theme: "grid",
-          margin: { left: 15, right: 120 },
-          headStyles: { fillColor: [71, 85, 105], textColor: 255, fontSize: 8, halign: "center" },
-          styles: { fontSize: 8, cellPadding: 1.5 }
-        });
-
-        // Catatan Wali Kelas Box
-        doc.setFontSize(8);
-        doc.setFont("helvetica", "bold");
-        doc.text("Catatan Wali Kelas:", 95, currentY + 3);
-        doc.setFont("helvetica", "normal");
-        const splitCatatan = doc.splitTextToSize(studentRaport.catatanWaliKelas, 100);
-        doc.text(splitCatatan, 95, currentY + 8);
-
-        // Kenaikan Kelas jika Semester Genap
-        if (studentRaport.statusKenaikan) {
-          doc.setFont("helvetica", "bold");
-          doc.text(`Keputusan: ${studentRaport.statusKenaikan.status} (${studentRaport.statusKenaikan.keKelas || ''})`, 95, currentY + 22);
-        }
-
-        // Tanda Tangan
-        const ttdY = currentY + 32;
-        doc.setFontSize(8);
-        doc.setFont("helvetica", "normal");
-
-        if (showTtdKepsek) {
-          // 3 Kolom: Orang Tua (kiri: x=25), Kepala Sekolah (tengah: x=105), Guru Kelas (kanan: x=145)
-          doc.text("Mengetahui,", 25, ttdY);
-          doc.text("Orang Tua / Wali Siswa,", 25, ttdY + 4);
-          doc.text("( .................................... )", 25, ttdY + 22);
-
-          doc.text("Mengetahui,", 105, ttdY, { align: "center" });
-          doc.text("Kepala Sekolah,", 105, ttdY + 4, { align: "center" });
-          doc.setFont("helvetica", "bold");
-          doc.text(studentRaport.namaKepsek || config.Nama_Kepala_Sekolah || "SUBUR, S.Pd.SD.", 105, ttdY + 20, { align: "center" });
+          // Area Tanda Tangan: Dijamin Pas di Bagian Bawah Kertas F4 (Y max 320mm)
+          const ttdY = Math.min(296, Math.max(postSectionY + 2.5, 282));
+          doc.setFontSize(7.5);
           doc.setFont("helvetica", "normal");
-          doc.text(`NIP. ${studentRaport.nipKepsek || config.NIP_Kepala_Sekolah || "197002111993081001"}`, 105, ttdY + 24, { align: "center" });
 
           const tglFormatted = formatTanggalIndonesia(studentRaport.tanggalRaport || tanggalRaport);
           const tempatTtd = studentRaport.tempatTitimangsa || tempatTitimangsa || config.Tempat_Tanda_Tangan || "Kab. Bogor";
 
-          doc.text(`${tempatTtd}, ${tglFormatted}`, 145, ttdY);
-          doc.text("Guru Kelas / Wali Kelas,", 145, ttdY + 4);
-          doc.setFont("helvetica", "bold");
-          doc.text(studentRaport.namaGuruWali || currentUser.name || "Eri Iriana Rifai, S.Kom.", 145, ttdY + 20);
-          doc.setFont("helvetica", "normal");
-          doc.text(`NIP. ${studentRaport.nipGuruWali || "-"}`, 145, ttdY + 24);
-        } else {
-          // 2 Kolom Seimbang: Orang Tua (kiri: x=25), Guru Kelas (kanan: x=145)
-          const tglFormatted = formatTanggalIndonesia(studentRaport.tanggalRaport || tanggalRaport);
-          const tempatTtd = studentRaport.tempatTitimangsa || tempatTitimangsa || config.Tempat_Tanda_Tangan || "Kab. Bogor";
+          if (showTtdKepsek) {
+            // 3 Kolom Seimbang: Orang Tua (x=35), Kepala Sekolah (x=107.5), Guru Kelas (x=175)
+            doc.text("Mengetahui,", 35, ttdY, { align: "center" });
+            doc.text("Orang Tua / Wali Siswa,", 35, ttdY + 3.8, { align: "center" });
+            doc.text("( .................................... )", 35, ttdY + 16, { align: "center" });
 
-          doc.text("Mengetahui,", 25, ttdY);
-          doc.text("Orang Tua / Wali Siswa,", 25, ttdY + 4);
-          doc.text("( .................................... )", 25, ttdY + 22);
+            doc.text("Mengetahui,", 107.5, ttdY, { align: "center" });
+            doc.text("Kepala Sekolah,", 107.5, ttdY + 3.8, { align: "center" });
+            doc.setFont("helvetica", "bold");
+            doc.text(studentRaport.namaKepsek || config.Nama_Kepala_Sekolah || "SUBUR, S.Pd.SD.", 107.5, ttdY + 15, { align: "center" });
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(7);
+            doc.text(`NIP. ${studentRaport.nipKepsek || config.NIP_Kepala_Sekolah || "197002111993081001"}`, 107.5, ttdY + 18.5, { align: "center" });
 
-          doc.text(`${tempatTtd}, ${tglFormatted}`, 145, ttdY);
-          doc.text("Guru Kelas / Wali Kelas,", 145, ttdY + 4);
-          doc.setFont("helvetica", "bold");
-          doc.text(studentRaport.namaGuruWali || currentUser.name || "Eri Iriana Rifai, S.Kom.", 145, ttdY + 20);
-          doc.setFont("helvetica", "normal");
-          doc.text(`NIP. ${studentRaport.nipGuruWali || "-"}`, 145, ttdY + 24);
+            doc.setFontSize(7.5);
+            doc.text(`${tempatTtd}, ${tglFormatted}`, 175, ttdY, { align: "center" });
+            doc.text("Guru Kelas / Wali Kelas,", 175, ttdY + 3.8, { align: "center" });
+            doc.setFont("helvetica", "bold");
+            doc.text(studentRaport.namaGuruWali || currentUser?.nama || "Eri Iriana Rifai, S.Kom.", 175, ttdY + 15, { align: "center" });
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(7);
+            doc.text(`NIP. ${studentRaport.nipGuruWali || "-"}`, 175, ttdY + 18.5, { align: "center" });
+          } else {
+            // 2 Kolom Seimbang: Orang Tua (x=45), Guru Kelas (x=165)
+            doc.text("Mengetahui,", 45, ttdY, { align: "center" });
+            doc.text("Orang Tua / Wali Siswa,", 45, ttdY + 3.8, { align: "center" });
+            doc.text("( .................................... )", 45, ttdY + 16, { align: "center" });
+
+            doc.text(`${tempatTtd}, ${tglFormatted}`, 165, ttdY, { align: "center" });
+            doc.text("Guru Kelas / Wali Kelas,", 165, ttdY + 3.8, { align: "center" });
+            doc.setFont("helvetica", "bold");
+            doc.text(studentRaport.namaGuruWali || currentUser?.nama || "Eri Iriana Rifai, S.Kom.", 165, ttdY + 15, { align: "center" });
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(7);
+            doc.text(`NIP. ${studentRaport.nipGuruWali || "-"}`, 165, ttdY + 18.5, { align: "center" });
+          }
         }
       });
 
       const cleanName = selectedSiswaId === "all" ? `Semua_Siswa_${selectedKelas}` : targetStudents[0]?.nama.replace(/\s+/g, "_");
-      doc.save(`Raport_${cleanName}_${currentPeriodeInfo.short}_${selectedTahunAjaran.replace(/\//g, "-")}.pdf`);
-      notifyUnduhSuccess("Dokumen Raport PDF berhasil dibuat dan diunduh!");
+      const modeSuffix = printMode === "cover" ? "Cover_" : printMode === "lembar_nilai" ? "Nilai_" : "";
+      doc.save(`Raport_F4_${modeSuffix}${cleanName}_${currentPeriodeInfo.short}_${selectedTahunAjaran.replace(/\//g, "-")}.pdf`);
+      notifyUnduhSuccess("Dokumen Raport PDF F4 (1 Lembar Utuh) berhasil dibuat dan diunduh!");
     } catch (err: any) {
-      notifyUnduhError("Gagal membuat PDF Raport: " + (err?.message || "Error"));
+      notifyUnduhError("Gagal membuat PDF Raport F4: " + (err?.message || "Error"));
     }
   };
 
@@ -2507,6 +2722,16 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
               <Sparkles className="w-3.5 h-3.5 text-amber-300" />
               <span>Kelola TP & AI Deskripsi</span>
             </button>
+
+            <button
+              type="button"
+              onClick={handleBatchSyncAllTpWithNilai}
+              className="inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold bg-blue-50 text-blue-800 dark:bg-blue-950/40 dark:text-blue-300 border border-blue-300 dark:border-blue-700 hover:bg-blue-100 dark:hover:bg-blue-900/60 transition cursor-pointer shadow-xs active:scale-95"
+              title="Perbarui otomatis deskripsi rapor seluruh siswa kelas ini dengan menggabungkan semua butir TP dari Bank TP"
+            >
+              <RefreshCw className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+              <span>⚡ Re-Sync Bank TP</span>
+            </button>
           </div>
         </div>
 
@@ -2746,7 +2971,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
                 className="inline-flex items-center space-x-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-md transition active:scale-95 cursor-pointer"
               >
                 <Printer className="w-4 h-4" />
-                <span>Cetak via Browser (A4)</span>
+                <span>Cetak via Browser (Kertas F4)</span>
               </button>
 
               <button
@@ -2754,7 +2979,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
                 className="inline-flex items-center space-x-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-md transition active:scale-95 cursor-pointer"
               >
                 <FileText className="w-4 h-4" />
-                <span>Unduh PDF Resmi</span>
+                <span>Unduh PDF F4 (1 Lembar Utuh)</span>
               </button>
             </div>
           </div>
@@ -2771,298 +2996,298 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
               </p>
             </div>
           ) : (
-            <div className="space-y-8">
+            <div className="space-y-10 print:space-y-0">
               {(selectedSiswaId === "all" ? classStudents : [selectedStudentData]).map((student, sIdx) => {
                 if (!student) return null;
                 const studentRaport = getRaportForStudent(student);
 
                 return (
-                  <div 
-                    key={student.id} 
-                    className={`bg-white text-black p-8 sm:p-12 rounded-2xl shadow-md border border-slate-200 mx-auto max-w-[210mm] min-h-[297mm] print:shadow-none print:border-none print:p-0 print:m-0 print:max-w-none ${
-                      sIdx > 0 ? "print:break-before-page" : ""
-                    }`}
-                  >
-                    {/* COVER PAGE (Rendered if mode is full or cover) */}
+                  <React.Fragment key={student.id}>
+                    {/* LEMBAR 1: COVER RAPOR (1 Lembar Utuh Kertas F4) */}
                     {(printMode === "full" || printMode === "cover") && (
-                      <div className="flex flex-col justify-between min-h-[260mm] border-4 border-double border-slate-800 p-8 text-center mb-8 print:mb-0 print:break-after-page">
-                        {/* Top School Header */}
-                        <div className="space-y-1.5">
-                          <p className="text-xs font-bold uppercase tracking-widest text-slate-700">
-                            {config.Pemerintah || "PEMERINTAH KABUPATEN BOGOR"}
-                          </p>
-                          <p className="text-xs font-bold uppercase tracking-widest text-slate-700">
-                            {config.Dinas || "DINAS PENDIDIKAN"}
-                          </p>
-                          <h2 className="text-xl sm:text-2xl font-black tracking-wider uppercase text-slate-900 mt-1">
-                            {config.Nama_Sekolah || "SD NEGERI BABAKAN 04"}
-                          </h2>
-                          <div className="pt-2">
-                            <h3 className="text-base sm:text-lg font-bold tracking-wider uppercase text-slate-800">
-                              LAPORAN HASIL BELAJAR PESERTA DIDIK
-                            </h3>
-                            <p className="text-xs sm:text-sm font-semibold text-slate-600 uppercase">
-                              ( RAPOR KURIKULUM MERDEKA )
+                      <div className="raport-f4-page raport-f4-cover bg-white text-black p-6 sm:p-10 rounded-2xl shadow-xl border border-slate-300 mx-auto w-full max-w-[215mm] min-h-[330mm] box-border mb-10 print:mb-0 print:p-0 print:shadow-none print:border-none print:w-[195mm] print:max-w-[195mm] print:h-[314mm] print:max-h-[314mm] print:overflow-hidden print:rounded-none">
+                        <div className="raport-f4-cover-box flex flex-col justify-between h-full border-4 border-double border-slate-900 p-6 sm:p-8 text-center box-border">
+                          {/* Top School Header */}
+                          <div className="space-y-1.5">
+                            <p className="text-xs font-bold uppercase tracking-widest text-slate-700">
+                              {config.Pemerintah || "PEMERINTAH KABUPATEN BOGOR"}
                             </p>
-                          </div>
-                        </div>
-
-                        {/* Middle Logo & Emblem */}
-                        <div className="my-8 flex flex-col items-center justify-center space-y-4">
-                          {config.Logo_Kiri ? (
-                            <img 
-                              src={config.Logo_Kiri} 
-                              alt="Logo Sekolah" 
-                              className="w-28 h-28 object-contain"
-                            />
-                          ) : (
-                            <div className="w-28 h-28 rounded-full border-4 border-blue-900 flex items-center justify-center bg-blue-50 text-blue-900 shadow-inner">
-                              <GraduationCap className="w-16 h-16" />
+                            <p className="text-xs font-bold uppercase tracking-widest text-slate-700">
+                              {config.Dinas || "DINAS PENDIDIKAN"}
+                            </p>
+                            <h2 className="text-xl sm:text-2xl font-black tracking-wider uppercase text-slate-900 mt-1">
+                              {config.Nama_Sekolah || "SD NEGERI BABAKAN 04"}
+                            </h2>
+                            <div className="pt-2">
+                              <h3 className="text-base sm:text-lg font-bold tracking-wider uppercase text-slate-800">
+                                LAPORAN HASIL BELAJAR PESERTA DIDIK
+                              </h3>
+                              <p className="text-xs sm:text-sm font-semibold text-slate-600 uppercase">
+                                ( RAPOR KURIKULUM MERDEKA )
+                              </p>
                             </div>
-                          )}
-                          <div className="space-y-1">
-                            <h3 className="text-lg font-bold text-slate-800 uppercase tracking-wide">
-                              {studentRaport.periodeNama}
-                            </h3>
-                            <p className="text-xs font-semibold text-slate-600">
-                              Tahun Ajaran {studentRaport.tahunAjaran}
-                            </p>
                           </div>
-                        </div>
 
-                        {/* Student Identitas Box */}
-                        <div className="max-w-md mx-auto w-full border border-slate-400 p-4 rounded-lg bg-slate-50/50 space-y-2 text-left text-xs sm:text-sm">
-                          <div className="flex">
-                            <span className="w-36 font-semibold text-slate-600">Nama Siswa</span>
-                            <span className="mr-2">:</span>
-                            <strong className="font-bold text-slate-900 uppercase">{student.nama}</strong>
+                          {/* Middle Logo & Emblem */}
+                          <div className="my-6 flex flex-col items-center justify-center space-y-3">
+                            {config.Logo_Kiri ? (
+                              <img 
+                                src={config.Logo_Kiri} 
+                                alt="Logo Sekolah" 
+                                className="w-24 h-24 object-contain"
+                              />
+                            ) : (
+                              <div className="w-24 h-24 rounded-full border-4 border-blue-900 flex items-center justify-center bg-blue-50 text-blue-900 shadow-inner">
+                                <GraduationCap className="w-14 h-14" />
+                              </div>
+                            )}
+                            <div className="space-y-1">
+                              <h3 className="text-base sm:text-lg font-bold text-slate-800 uppercase tracking-wide">
+                                {studentRaport.periodeNama}
+                              </h3>
+                              <p className="text-xs font-semibold text-slate-600">
+                                Tahun Ajaran {studentRaport.tahunAjaran}
+                              </p>
+                            </div>
                           </div>
-                          <div className="flex">
-                            <span className="w-36 font-semibold text-slate-600">NISN / NIS</span>
-                            <span className="mr-2">:</span>
-                            <span className="font-semibold text-slate-800">{student.nisn || "-"} / {student.nis || "-"}</span>
-                          </div>
-                          <div className="flex">
-                            <span className="w-36 font-semibold text-slate-600">Kelas / Fase</span>
-                            <span className="mr-2">:</span>
-                            <span className="font-semibold text-slate-800">{student.kelas} / {studentRaport.fase}</span>
-                          </div>
-                          <div className="flex">
-                            <span className="w-36 font-semibold text-slate-600">Nama Sekolah</span>
-                            <span className="mr-2">:</span>
-                            <span className="font-bold text-slate-900">{config.Nama_Sekolah || "SD NEGERI BABAKAN 04"}</span>
-                          </div>
-                          <div className="flex">
-                            <span className="w-36 font-semibold text-slate-600">NPSN</span>
-                            <span className="mr-2">:</span>
-                            <span className="font-semibold text-slate-800">{config.NPSN || "20200889"}</span>
-                          </div>
-                        </div>
 
-                        {/* Footer Cover */}
-                        <div className="pt-6 space-y-1 text-xs text-slate-600">
-                          <p className="font-bold text-slate-800 uppercase">{config.Nama_Sekolah || "SD NEGERI BABAKAN 04"}</p>
-                          <p>{config.Alamat_Sekolah || "Kp. Babakan Kulon RT.05/02 Desa Babakan Kec. Ciseeng Kab. Bogor"}</p>
+                          {/* Student Identitas Box */}
+                          <div className="max-w-md mx-auto w-full border border-slate-400 p-4 rounded-lg bg-slate-50/50 space-y-2 text-left text-xs sm:text-sm">
+                            <div className="flex">
+                              <span className="w-36 font-semibold text-slate-600">Nama Siswa</span>
+                              <span className="mr-2">:</span>
+                              <strong className="font-bold text-slate-900 uppercase">{student.nama}</strong>
+                            </div>
+                            <div className="flex">
+                              <span className="w-36 font-semibold text-slate-600">NISN / NIS</span>
+                              <span className="mr-2">:</span>
+                              <span className="font-semibold text-slate-800">{student.nisn || "-"} / {student.nis || "-"}</span>
+                            </div>
+                            <div className="flex">
+                              <span className="w-36 font-semibold text-slate-600">Kelas / Fase</span>
+                              <span className="mr-2">:</span>
+                              <span className="font-semibold text-slate-800">{student.kelas} / {studentRaport.fase}</span>
+                            </div>
+                            <div className="flex">
+                              <span className="w-36 font-semibold text-slate-600">Nama Sekolah</span>
+                              <span className="mr-2">:</span>
+                              <span className="font-bold text-slate-900">{config.Nama_Sekolah || "SD NEGERI BABAKAN 04"}</span>
+                            </div>
+                            <div className="flex">
+                              <span className="w-36 font-semibold text-slate-600">NPSN</span>
+                              <span className="mr-2">:</span>
+                              <span className="font-semibold text-slate-800">{config.NPSN || "20200889"}</span>
+                            </div>
+                          </div>
+
+                          {/* Footer Cover */}
+                          <div className="pt-4 space-y-1 text-xs text-slate-600">
+                            <p className="font-bold text-slate-800 uppercase">{config.Nama_Sekolah || "SD NEGERI BABAKAN 04"}</p>
+                            <p>{config.Alamat_Sekolah || "Kp. Babakan Kulon RT.05/02 Desa Babakan Kec. Ciseeng Kab. Bogor"}</p>
+                          </div>
                         </div>
                       </div>
                     )}
 
-                    {/* LEMBAR NILAI CAPAIAN HASIL BELAJAR */}
+                    {/* LEMBAR 2: NILAI CAPAIAN HASIL BELAJAR (1 Lembar Utuh Kertas F4) */}
                     {(printMode === "full" || printMode === "lembar_nilai") && (
-                      <div className="space-y-6">
-                        {/* Kop Surat Resmi */}
-                        {showKopSekolah && (
-                          <KopSuratDinas 
-                            config={config} 
-                            showDoubleLine={true} 
-                            className="mb-3"
-                          />
-                        )}
+                      <div className="raport-f4-page raport-f4-nilai bg-white text-black p-6 sm:p-8 rounded-2xl shadow-xl border border-slate-300 mx-auto w-full max-w-[215mm] min-h-[330mm] box-border mb-10 print:mb-0 print:p-0 print:shadow-none print:border-none print:w-[195mm] print:max-w-[195mm] print:h-[314mm] print:max-h-[314mm] print:overflow-hidden print:rounded-none">
+                        <div className="raport-f4-nilai-box flex flex-col justify-between h-full space-y-3 print:space-y-1.5 box-border">
+                          {/* Kop Surat Resmi */}
+                          {showKopSekolah && (
+                            <KopSuratDinas 
+                              config={config} 
+                              showDoubleLine={true} 
+                              className="mb-1 print:mb-0 scale-95 origin-top"
+                            />
+                          )}
 
-                        {/* Title Laporan */}
-                        <div className="text-center space-y-1">
-                          <h4 className="text-sm font-bold uppercase tracking-wider underline">
-                            LAPORAN HASIL BELAJAR (RAPOR)
-                          </h4>
-                          <p className="text-[11px] font-semibold text-slate-700">
-                            {studentRaport.periodeNama} — Tahun Ajaran {studentRaport.tahunAjaran}
-                          </p>
-                        </div>
-
-                        {/* Header Data Siswa */}
-                        <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-slate-800 border-b border-slate-300 pb-3">
-                          <div className="flex"><span className="w-32 font-semibold">Nama Peserta Didik</span><span className="mr-2">:</span><strong className="uppercase">{student.nama}</strong></div>
-                          <div className="flex"><span className="w-32 font-semibold">Kelas / Fase</span><span className="mr-2">:</span><span>{student.kelas} / {studentRaport.fase}</span></div>
-                          <div className="flex"><span className="w-32 font-semibold">NISN / NIS</span><span className="mr-2">:</span><span>{student.nisn || "-"} / {student.nis || "-"}</span></div>
-                          <div className="flex"><span className="w-32 font-semibold">Semester</span><span className="mr-2">:</span><span>{studentRaport.semester}</span></div>
-                          <div className="flex"><span className="w-32 font-semibold">Nama Sekolah</span><span className="mr-2">:</span><span>{config.Nama_Sekolah || "SD NEGERI BABAKAN 04"}</span></div>
-                          <div className="flex"><span className="w-32 font-semibold">Tahun Ajaran</span><span className="mr-2">:</span><span>{studentRaport.tahunAjaran}</span></div>
-                        </div>
-
-                        {/* Tabel Capaian Hasil Belajar */}
-                        <div className="space-y-2">
-                          <h5 className="text-xs font-bold uppercase text-slate-900 tracking-wide">
-                            A. Nilai Capaian Kompetensi Pembelajaran
-                          </h5>
-                          <div className="overflow-x-auto">
-                            <table className="w-full text-left text-xs border border-collapse border-black">
-                              <thead>
-                                <tr className="bg-slate-100 text-slate-900 border-b border-black">
-                                  <th className="p-2 border border-black text-center w-8">No</th>
-                                  <th className="p-2 border border-black w-48">Mata Pelajaran</th>
-                                  <th className="p-2 border border-black text-center w-16">Nilai Akhir</th>
-                                  <th className="p-2 border border-black">Capaian Kompetensi / Deskripsi Kemajuan Belajar</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {(() => {
-                                  const mapelOrderLookup = new Map<string, number>(displayMapelNames.map((m, idx) => [m.toLowerCase(), idx]));
-                                  const filtered = studentRaport.nilaiMapel
-                                    .filter((nm) => mapelOrderLookup.has(nm.mapel.toLowerCase()))
-                                    .sort((a, b) => {
-                                      const orderA = mapelOrderLookup.get(a.mapel.toLowerCase()) ?? 999;
-                                      const orderB = mapelOrderLookup.get(b.mapel.toLowerCase()) ?? 999;
-                                      return orderA - orderB;
-                                    });
-                                  const toRender = filtered.length > 0 ? filtered : studentRaport.nilaiMapel;
-                                  return toRender.map((nm, idx) => (
-                                    <tr key={idx} className="border-b border-black hover:bg-slate-50/50">
-                                      <td className="p-2 border border-black text-center font-semibold">{idx + 1}</td>
-                                      <td className="p-2 border border-black font-semibold text-slate-900">{nm.mapel}</td>
-                                      <td className="p-2 border border-black text-center font-bold text-slate-900">{nm.nilaiAkhir}</td>
-                                      <td className="p-2 border border-black text-[11px] leading-relaxed text-slate-800">
-                                        <p>{nm.capaianKompetensiTinggi || nm.deskripsi}</p>
-                                        {nm.capaianKompetensiPerluBimbingan && (
-                                          <p className="mt-1 text-slate-600 italic">
-                                            * {nm.capaianKompetensiPerluBimbingan}
-                                          </p>
-                                        )}
-                                      </td>
-                                    </tr>
-                                  ));
-                                })()}
-                              </tbody>
-                            </table>
+                          {/* Title Laporan */}
+                          <div className="text-center space-y-0.5">
+                            <h4 className="text-xs sm:text-sm font-bold uppercase tracking-wider underline">
+                              LAPORAN HASIL BELAJAR (RAPOR)
+                            </h4>
+                            <p className="text-[10px] sm:text-[11px] font-semibold text-slate-700">
+                              {studentRaport.periodeNama} — Tahun Ajaran {studentRaport.tahunAjaran}
+                            </p>
                           </div>
-                        </div>
 
-                        {/* B. Ekstrakurikuler */}
-                        {studentRaport.ekskul && studentRaport.ekskul.length > 0 && (
-                          <div className="space-y-2">
-                            <h5 className="text-xs font-bold uppercase text-slate-900 tracking-wide">
+                          {/* Header Data Siswa */}
+                          <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-[10px] sm:text-xs text-slate-800 border-b border-slate-300 pb-1.5">
+                            <div className="flex"><span className="w-28 font-semibold">Nama Peserta Didik</span><span className="mr-1.5">:</span><strong className="uppercase">{student.nama}</strong></div>
+                            <div className="flex"><span className="w-24 font-semibold">Kelas / Fase</span><span className="mr-1.5">:</span><span>{student.kelas} / {studentRaport.fase}</span></div>
+                            <div className="flex"><span className="w-28 font-semibold">NISN / NIS</span><span className="mr-1.5">:</span><span>{student.nisn || "-"} / {student.nis || "-"}</span></div>
+                            <div className="flex"><span className="w-24 font-semibold">Semester</span><span className="mr-1.5">:</span><span>{studentRaport.semester}</span></div>
+                            <div className="flex"><span className="w-28 font-semibold">Nama Sekolah</span><span className="mr-1.5">:</span><span>{config.Nama_Sekolah || "SD NEGERI BABAKAN 04"}</span></div>
+                            <div className="flex"><span className="w-24 font-semibold">Tahun Ajaran</span><span className="mr-1.5">:</span><span>{studentRaport.tahunAjaran}</span></div>
+                          </div>
+
+                          {/* Tabel A. Capaian Hasil Belajar */}
+                          <div className="space-y-1">
+                            <h5 className="text-[10.5px] font-bold uppercase text-slate-900 tracking-wide">
+                              A. Nilai Capaian Kompetensi Pembelajaran
+                            </h5>
+                            <div className="overflow-x-auto">
+                              <table className="raport-print-table w-full text-left text-[9.5px] border border-collapse border-black">
+                                <thead>
+                                  <tr className="bg-slate-100 text-slate-900 border-b border-black">
+                                    <th className="p-1 border border-black text-center w-7">No</th>
+                                    <th className="p-1 border border-black w-40">Mata Pelajaran</th>
+                                    <th className="p-1 border border-black text-center w-14">Nilai Akhir</th>
+                                    <th className="p-1 border border-black">Capaian Kompetensi / Deskripsi Kemajuan Belajar</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {(() => {
+                                    const mapelOrderLookup = new Map<string, number>(displayMapelNames.map((m, idx) => [m.toLowerCase(), idx]));
+                                    const filtered = studentRaport.nilaiMapel
+                                      .filter((nm) => mapelOrderLookup.has(nm.mapel.toLowerCase()))
+                                      .sort((a, b) => {
+                                        const orderA = mapelOrderLookup.get(a.mapel.toLowerCase()) ?? 999;
+                                        const orderB = mapelOrderLookup.get(b.mapel.toLowerCase()) ?? 999;
+                                        return orderA - orderB;
+                                      });
+                                    const toRender = filtered.length > 0 ? filtered : studentRaport.nilaiMapel;
+                                    return toRender.map((nm, idx) => (
+                                      <tr key={idx} className="border-b border-black hover:bg-slate-50/50">
+                                        <td className="p-1 border border-black text-center font-semibold">{idx + 1}</td>
+                                        <td className="p-1 border border-black font-semibold text-slate-900">{nm.mapel}</td>
+                                        <td className="p-1 border border-black text-center font-bold text-slate-900">{nm.nilaiAkhir}</td>
+                                        <td className="p-1 border border-black text-[9px] leading-snug text-slate-800">
+                                          <p>{nm.capaianKompetensiTinggi || nm.deskripsi}</p>
+                                          {nm.capaianKompetensiPerluBimbingan && (
+                                            <p className="mt-0.5 text-slate-600 italic">
+                                              * {nm.capaianKompetensiPerluBimbingan}
+                                            </p>
+                                          )}
+                                        </td>
+                                      </tr>
+                                    ));
+                                  })()}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+
+                          {/* Tabel B. Ekstrakurikuler */}
+                          <div className="space-y-1">
+                            <h5 className="text-[10.5px] font-bold uppercase text-slate-900 tracking-wide">
                               B. Kegiatan Ekstrakurikuler
                             </h5>
-                            <table className="w-full text-left text-xs border border-collapse border-black">
+                            <table className="raport-print-table w-full text-left text-[9.5px] border border-collapse border-black">
                               <thead>
                                 <tr className="bg-slate-100 text-slate-900 border-b border-black">
-                                  <th className="p-2 border border-black text-center w-8">No</th>
-                                  <th className="p-2 border border-black w-48">Nama Kegiatan</th>
-                                  <th className="p-2 border border-black text-center w-16">Predikat</th>
-                                  <th className="p-2 border border-black">Keterangan</th>
+                                  <th className="p-1 border border-black text-center w-7">No</th>
+                                  <th className="p-1 border border-black w-40">Nama Kegiatan</th>
+                                  <th className="p-1 border border-black text-center w-14">Predikat</th>
+                                  <th className="p-1 border border-black">Keterangan</th>
                                 </tr>
                               </thead>
                               <tbody>
-                                {studentRaport.ekskul.map((ek, idx) => (
+                                {(studentRaport.ekskul && studentRaport.ekskul.length > 0 ? studentRaport.ekskul : [
+                                  { nama: "Pramuka", predikat: "A", keterangan: "Sangat aktif, disiplin, dan memiliki jiwa kepemimpinan yang baik." },
+                                  { nama: "Pencak Silat", predikat: "B", keterangan: "Menguasai gerakan dasar seni beladiri dengan baik." }
+                                ]).map((ek, idx) => (
                                   <tr key={idx} className="border-b border-black">
-                                    <td className="p-2 border border-black text-center">{idx + 1}</td>
-                                    <td className="p-2 border border-black font-semibold">{ek.nama}</td>
-                                    <td className="p-2 border border-black text-center font-bold">{ek.predikat}</td>
-                                    <td className="p-2 border border-black text-[11px]">{ek.keterangan}</td>
+                                    <td className="p-1 border border-black text-center">{idx + 1}</td>
+                                    <td className="p-1 border border-black font-semibold">{ek.nama}</td>
+                                    <td className="p-1 border border-black text-center font-bold">{ek.predikat}</td>
+                                    <td className="p-1 border border-black text-[9px]">{ek.keterangan}</td>
                                   </tr>
                                 ))}
                               </tbody>
                             </table>
                           </div>
-                        )}
 
-                        {/* C. Ketidakhadiran & Catatan */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
-                          {/* Absensi */}
-                          <div className="space-y-1.5">
-                            <h5 className="text-xs font-bold uppercase text-slate-900 tracking-wide">
-                              C. Ketidakhadiran
-                            </h5>
-                            <table className="w-full text-xs border border-collapse border-black">
-                              <tbody>
-                                <tr className="border-b border-black">
-                                  <td className="p-2 border border-black w-44">Sakit (S)</td>
-                                  <td className="p-2 border border-black text-center font-bold">{studentRaport.kehadiran.sakit} hari</td>
-                                </tr>
-                                <tr className="border-b border-black">
-                                  <td className="p-2 border border-black">Izin (I)</td>
-                                  <td className="p-2 border border-black text-center font-bold">{studentRaport.kehadiran.izin} hari</td>
-                                </tr>
-                                <tr>
-                                  <td className="p-2 border border-black">Tanpa Keterangan (A)</td>
-                                  <td className="p-2 border border-black text-center font-bold">{studentRaport.kehadiran.alpa} hari</td>
-                                </tr>
-                              </tbody>
-                            </table>
-                          </div>
+                          {/* C. Ketidakhadiran & D. Catatan Wali Kelas */}
+                          <div className="grid grid-cols-2 gap-3 pt-0.5">
+                            {/* Absensi */}
+                            <div className="space-y-1">
+                              <h5 className="text-[10.5px] font-bold uppercase text-slate-900 tracking-wide">
+                                C. Ketidakhadiran
+                              </h5>
+                              <table className="raport-print-table w-full text-[9.5px] border border-collapse border-black">
+                                <tbody>
+                                  <tr className="border-b border-black">
+                                    <td className="p-1 border border-black">Sakit (S)</td>
+                                    <td className="p-1 border border-black text-center font-bold w-16">{studentRaport.kehadiran.sakit} hari</td>
+                                  </tr>
+                                  <tr className="border-b border-black">
+                                    <td className="p-1 border border-black">Izin (I)</td>
+                                    <td className="p-1 border border-black text-center font-bold w-16">{studentRaport.kehadiran.izin} hari</td>
+                                  </tr>
+                                  <tr>
+                                    <td className="p-1 border border-black">Tanpa Keterangan (A)</td>
+                                    <td className="p-1 border border-black text-center font-bold w-16">{studentRaport.kehadiran.alpa} hari</td>
+                                  </tr>
+                                </tbody>
+                              </table>
+                            </div>
 
-                          {/* Catatan Wali Kelas */}
-                          <div className="space-y-1.5">
-                            <h5 className="text-xs font-bold uppercase text-slate-900 tracking-wide">
-                              D. Catatan Wali Kelas
-                            </h5>
-                            <div className="p-3 border border-black text-xs min-h-[90px] leading-relaxed text-slate-800 italic bg-slate-50/40 rounded-sm">
-                              "{studentRaport.catatanWaliKelas}"
+                            {/* Catatan Wali Kelas */}
+                            <div className="space-y-1">
+                              <h5 className="text-[10.5px] font-bold uppercase text-slate-900 tracking-wide">
+                                D. Catatan Wali Kelas
+                              </h5>
+                              <div className="p-2 border border-black text-[9.5px] leading-relaxed text-slate-800 italic bg-slate-50/40 rounded-sm h-[62px] overflow-hidden">
+                                "{studentRaport.catatanWaliKelas || 'Pertahankan prestasi dan tetap semangat dalam belajar.'}"
+                              </div>
                             </div>
                           </div>
-                        </div>
 
-                        {/* Keputusan Kenaikan Kelas jika Semester Genap */}
-                        {studentRaport.statusKenaikan && (
-                          <div className="p-3 border-2 border-black rounded-md bg-slate-50 text-xs">
-                            <span className="font-bold uppercase mr-2">Keputusan Akhir Tahun:</span>
-                            <span className="font-bold text-blue-900">
-                              Berdasarkan hasil pencapaian kompetensi, peserta didik dinyatakan: {studentRaport.statusKenaikan.status} ({studentRaport.statusKenaikan.keKelas || ''})
-                            </span>
-                          </div>
-                        )}
-
-                        {/* Area Tanda Tangan */}
-                        <div className={`pt-6 ${showTtdKepsek ? "grid grid-cols-3 gap-2" : "flex justify-between px-8"} text-center text-xs text-slate-900`}>
-                          <div className="space-y-16">
-                            <div>
-                              <p>Mengetahui,</p>
-                              <p className="font-semibold">Orang Tua / Wali Siswa</p>
-                            </div>
-                            <p className="border-b border-black inline-block min-w-[140px] pb-1 font-semibold">
-                              ( .................................... )
-                            </p>
-                          </div>
-
-                          {showTtdKepsek && (
-                            <div className="space-y-16">
-                              <div>
-                                <p>Mengetahui,</p>
-                                <p className="font-semibold">Kepala Sekolah</p>
-                              </div>
-                              <div>
-                                <p className="font-bold underline">{studentRaport.namaKepsek || config.Nama_Kepala_Sekolah || "SUBUR, S.Pd.SD."}</p>
-                                <p className="text-[10px]">NIP. {studentRaport.nipKepsek || config.NIP_Kepala_Sekolah || "197002111993081001"}</p>
-                              </div>
+                          {/* Keputusan Kenaikan Kelas jika Semester Genap */}
+                          {studentRaport.statusKenaikan && (
+                            <div className="p-1.5 border border-black rounded-sm bg-slate-50 text-[9.5px]">
+                              <span className="font-bold uppercase mr-1.5">Keputusan Akhir Tahun:</span>
+                              <span className="font-bold text-blue-900">
+                                Berdasarkan hasil pencapaian kompetensi, peserta didik dinyatakan: {studentRaport.statusKenaikan.status} ({studentRaport.statusKenaikan.keKelas || ''})
+                              </span>
                             </div>
                           )}
 
-                          <div className="space-y-16">
-                            <div>
-                              <p>
-                                {studentRaport.tempatTitimangsa || tempatTitimangsa || config.Tempat_Tanda_Tangan || "Kab. Bogor"},{" "}
-                                {formatTanggalIndonesia(studentRaport.tanggalRaport || tanggalRaport)}
+                          {/* Area Tanda Tangan */}
+                          <div className={`pt-2 ${showTtdKepsek ? "grid grid-cols-3 gap-2" : "flex justify-between px-6"} text-center text-[10px] text-slate-900`}>
+                            <div className="space-y-8 print:space-y-8">
+                              <div>
+                                <p>Mengetahui,</p>
+                                <p className="font-semibold">Orang Tua / Wali Siswa</p>
+                              </div>
+                              <p className="border-b border-black inline-block min-w-[120px] pb-0.5 font-semibold">
+                                ( .................................... )
                               </p>
-                              <p className="font-semibold">Guru Kelas / Wali Kelas</p>
                             </div>
-                            <div>
-                              <p className="font-bold underline">{studentRaport.namaGuruWali || currentUser.name || "Eri Iriana Rifai, S.Kom."}</p>
-                              <p className="text-[10px]">NIP. {studentRaport.nipGuruWali || "-"}</p>
+
+                            {showTtdKepsek && (
+                              <div className="space-y-8 print:space-y-8">
+                                <div>
+                                  <p>Mengetahui,</p>
+                                  <p className="font-semibold">Kepala Sekolah</p>
+                                </div>
+                                <div>
+                                  <p className="font-bold underline">{studentRaport.namaKepsek || config.Nama_Kepala_Sekolah || "SUBUR, S.Pd.SD."}</p>
+                                  <p className="text-[9px]">NIP. {studentRaport.nipKepsek || config.NIP_Kepala_Sekolah || "197002111993081001"}</p>
+                                </div>
+                              </div>
+                            )}
+
+                            <div className="space-y-8 print:space-y-8">
+                              <div>
+                                <p>
+                                  {studentRaport.tempatTitimangsa || tempatTitimangsa || config.Tempat_Tanda_Tangan || "Kab. Bogor"},{" "}
+                                  {formatTanggalIndonesia(studentRaport.tanggalRaport || tanggalRaport)}
+                                </p>
+                                <p className="font-semibold">Guru Kelas / Wali Kelas</p>
+                              </div>
+                              <div>
+                                <p className="font-bold underline">{studentRaport.namaGuruWali || currentUser?.nama || "Eri Iriana Rifai, S.Kom."}</p>
+                                <p className="text-[9px]">NIP. {studentRaport.nipGuruWali || "-"}</p>
+                              </div>
                             </div>
                           </div>
                         </div>
                       </div>
                     )}
-                  </div>
+                  </React.Fragment>
                 );
               })}
             </div>

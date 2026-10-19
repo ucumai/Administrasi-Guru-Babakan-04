@@ -115,6 +115,28 @@
       },
       "required": ["judul", "mataPelajaran", "kelas"]
     },
+    "bank_tp": {
+      "title": "Bank Tujuan Pembelajaran",
+      "type": "object",
+      "properties": {
+        "kodeTp": { "type": "string" },
+        "tujuanPembelajaran": { "type": "string" },
+        "mapel": { "type": "string" },
+        "kelas": { "type": "string" },
+        "createdBy": { "type": "string" }
+      }
+    },
+    "users": {
+      "title": "Pengguna Aplikasi",
+      "type": "object",
+      "properties": {
+        "username": { "type": "string" },
+        "nama": { "type": "string" },
+        "role": { "type": "string" },
+        "kelasUtama": { "type": "string" }
+      },
+      "required": ["username", "nama", "role"]
+    },
     "pengaturan": {
       "title": "Pengaturan Aplikasi",
       "type": "object",

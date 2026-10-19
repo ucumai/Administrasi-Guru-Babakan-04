@@ -53,15 +53,16 @@ export const InputAbsensiView: React.FC<InputAbsensiViewProps> = ({
   const allowedClasses = getAllowedClasses(currentUser, siswaList.map((s) => s.kelas));
   const isGuruKelas = currentUser?.role === "guru_kelas";
 
-  // Set default class and mapel for guru_kelas
+  // Set default class and mapel
   useEffect(() => {
-    if (allowedClasses.length > 0 && !selectedKelas) {
-      setSelectedKelas(allowedClasses[0]);
+    if (allowedClasses.length > 0 && (!selectedKelas || !siswaList.some((s) => s.kelas === selectedKelas))) {
+      const firstClassWithStudents = siswaList.find((s) => Boolean(s.kelas))?.kelas;
+      setSelectedKelas(firstClassWithStudents || allowedClasses[0]);
     }
     if (isGuruKelas && !selectedMapel) {
       setSelectedMapel("Semua Mapel (Guru Kelas)");
     }
-  }, [allowedClasses, selectedKelas, isGuruKelas, selectedMapel]);
+  }, [allowedClasses, selectedKelas, isGuruKelas, selectedMapel, siswaList]);
 
   const studentsInClass = siswaList.filter((s) => s.kelas === selectedKelas);
 

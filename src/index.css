@@ -59,27 +59,29 @@
   }
 }
 
-/* Print Styles for F4 / Folio (215mm x 330mm) - 1 Halaman Utuh */
+/* Print Styles for F4 / Folio (215mm x 330mm) - 1 Halaman Utuh Tanpa Terpotong */
 @media print {
   @page {
-    size: 215mm 330mm; /* Kertas F4 / Folio Resmi */
+    size: 215mm 330mm; /* Standar Kertas Resmi F4 / Folio di Indonesia */
     margin: 8mm 10mm 8mm 10mm;
   }
 
   html, body {
     width: 215mm !important;
+    margin: 0 !important;
+    padding: 0 !important;
     background: #ffffff !important;
     color: #000000 !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
-    font-size: 11px !important;
+    font-size: 10px !important;
   }
 
-  /* Kontainer 1 Lembar Utuh Kertas F4 */
+  /* Kontainer 1 Lembar Utuh Kertas F4 (215mm x 330mm) */
   .raport-f4-page {
     width: 195mm !important; /* 215mm - 20mm margin */
     max-width: 195mm !important;
-    min-height: 310mm !important;
+    height: 314mm !important; /* 330mm - 16mm margin */
     max-height: 314mm !important;
     page-break-after: always !important;
     break-after: page !important;
@@ -87,9 +89,12 @@
     break-inside: avoid !important;
     box-sizing: border-box !important;
     margin: 0 auto !important;
-    overflow: hidden !important;
     background: #ffffff !important;
     padding: 0 !important;
+    overflow: hidden !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: space-between !important;
   }
 
   .raport-f4-page:last-child {
@@ -97,8 +102,47 @@
     break-after: auto !important;
   }
 
+  /* Cover Page Styling Khusus Cetak 1 Lembar */
+  .raport-f4-cover-box {
+    height: 314mm !important;
+    max-height: 314mm !important;
+    box-sizing: border-box !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: space-between !important;
+    padding: 8mm 6mm !important;
+    border: 3px double #000000 !important;
+  }
+
+  /* Lembar Nilai Styling Khusus Cetak 1 Lembar */
+  .raport-f4-nilai-box {
+    height: 314mm !important;
+    max-height: 314mm !important;
+    box-sizing: border-box !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: space-between !important;
+    padding: 0 !important;
+  }
+
+  /* Tabel Cetak Raport Super Presisi & Rapi */
+  .raport-print-table {
+    border-collapse: collapse !important;
+    width: 100% !important;
+  }
+
   .raport-print-table th,
   .raport-print-table td {
-    border-color: #000000 !important;
+    border: 1px solid #000000 !important;
+    padding: 2px 4px !important;
+    font-size: 8.5pt !important;
+    line-height: 1.2 !important;
+  }
+
+  .raport-print-table th {
+    background-color: #f1f5f9 !important;
+    font-weight: bold !important;
+    text-align: center !important;
   }
 }
+

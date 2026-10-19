@@ -75,13 +75,14 @@ export const InputPenilaianView: React.FC<InputPenilaianViewProps> = ({
   const isGuruKelas = currentUser?.role === "guru_kelas";
 
   useEffect(() => {
-    if (allowedClasses.length > 0 && !selectedKelas) {
-      setSelectedKelas(allowedClasses[0]);
+    if (allowedClasses.length > 0 && (!selectedKelas || !siswaList.some((s) => s.kelas === selectedKelas))) {
+      const firstClassWithStudents = siswaList.find((s) => Boolean(s.kelas))?.kelas;
+      setSelectedKelas(firstClassWithStudents || allowedClasses[0]);
     }
     if (isGuruKelas && !selectedMapel) {
       setSelectedMapel("Tematik / Guru Kelas");
     }
-  }, [allowedClasses, selectedKelas, isGuruKelas, selectedMapel]);
+  }, [allowedClasses, selectedKelas, isGuruKelas, selectedMapel, siswaList]);
 
   // Persist selections whenever they change
   useEffect(() => {
@@ -193,16 +194,28 @@ export const InputPenilaianView: React.FC<InputPenilaianViewProps> = ({
         const rRec = savedCachedRaport[docId] || savedCachedRaport[altDocId] || savedCachedRaport[legacyId];
         const matchedMapel = rRec?.nilaiMapel?.find((nm: any) => nm.mapel?.toLowerCase() === effectiveMapel.toLowerCase());
 
-        if (matchedMapel?.capaianKompetensiTinggi) {
+        // Real-time Re-Sync: Generate fresh multi-TP descriptions combining all TPs from Bank TP
+        const gradeVal = mapG[s.id] !== "" && !isNaN(Number(mapG[s.id])) ? Number(mapG[s.id]) : 80;
+        const currentSemester = config?.Semester || "Ganjil";
+        const filteredBank = filterBankTpItems(bankTpList, selectedMapel || effectiveMapel, selectedKelas, currentSemester);
+        const fallbackTps = availableTps.map((a) => a.text).filter(Boolean);
+        const freshAuto = generateDynamicTpDescription(
+          selectedMapel || effectiveMapel,
+          gradeVal,
+          fallbackTps,
+          filteredBank,
+          75
+        );
+
+        if (matchedMapel && (matchedMapel as any).isManualCustom && matchedMapel.capaianKompetensiTinggi) {
           mapTinggi[s.id] = matchedMapel.capaianKompetensiTinggi;
           mapD[s.id] = matchedMapel.capaianKompetensiTinggi;
-        } else if (found?.deskripsi) {
-          mapTinggi[s.id] = found.deskripsi;
-          mapD[s.id] = found.deskripsi;
-        }
-
-        if (matchedMapel?.capaianKompetensiPerluBimbingan) {
-          mapBimbingan[s.id] = matchedMapel.capaianKompetensiPerluBimbingan;
+          mapBimbingan[s.id] = matchedMapel.capaianKompetensiPerluBimbingan || freshAuto.perluBimbingan;
+        } else {
+          // Fresh multi-TP auto-concatenation from Bank TP
+          mapTinggi[s.id] = freshAuto.tinggi;
+          mapD[s.id] = freshAuto.tinggi;
+          mapBimbingan[s.id] = freshAuto.perluBimbingan;
         }
       });
 
@@ -211,7 +224,7 @@ export const InputPenilaianView: React.FC<InputPenilaianViewProps> = ({
       setCustomDescBimbinganMap(mapBimbingan);
       setCustomDescMap(mapD);
     }
-  }, [selectedKelas, selectedMapel, jenisPenilaian, nilaiList, studentsInClass, isGuruKelas, config?.Tahun_Ajaran, config?.Semester]);
+  }, [selectedKelas, selectedMapel, jenisPenilaian, nilaiList, studentsInClass, isGuruKelas, config?.Tahun_Ajaran, config?.Semester, bankTpList, availableTps]);
 
   // Helper to generate dynamic TP achievement descriptions (both Tinggi & Bimbingan) based on grade
   const getAutoTpDescriptions = (grade: number | "", tpText: string) => {
