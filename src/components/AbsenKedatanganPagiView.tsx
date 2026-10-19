@@ -1229,6 +1229,112 @@ export const AbsenKedatanganPagiView: React.FC<AbsenKedatanganPagiViewProps> = (
     }
   };
 
+  // Export Template Excel matching PDF format
+  const exportTemplateExcel = () => {
+    try {
+      const sampleRows = [
+        {
+          Peringkat: 1,
+          NISN: "3148729110",
+          "Nama Siswa": "ASILA MULYA",
+          Kelas: "Kelas 6",
+          "Total Kehadiran Pagi": 11,
+          "Sangat Pagi (<06:30)": 5,
+          "Tepat Waktu (06:30-07:00)": 6,
+          "Terlambat (>07:00)": 0,
+          "Rata-Rata Jam Datang": "06:31",
+          "Gelar Karakter": "Singa Kedisiplinan",
+          "Skor Kedisiplinan": 98
+        }
+      ];
+      const worksheet = XLSX.utils.json_to_sheet(sampleRows);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Template_Rekap_Kedatangan");
+      XLSX.writeFile(workbook, "Template_Format_Absen_Kedatangan.xlsx");
+      notifyUnduhSuccess("Template Excel berhasil diunduh!");
+    } catch (err: any) {
+      notifyUnduhError("Gagal mendownload template Excel.");
+    }
+  };
+
+  // Import Rekap Excel and integrate into database
+  const handleImportRekapExcel = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      try {
+        const bstr = evt.target?.result;
+        const wb = XLSX.read(bstr, { type: "binary" });
+        const wsname = wb.SheetNames[0];
+        const ws = wb.Sheets[wsname];
+        const data: any[] = XLSX.utils.sheet_to_json(ws);
+
+        if (!data || data.length === 0) {
+          notifySimpanError("File Excel kosong atau format tidak sesuai.");
+          return;
+        }
+
+        const payloads: LogKedatangan[] = [];
+        const targetDate = selectedTanggal || getLocalDateStr();
+
+        data.forEach((row, idx) => {
+          const nisn = String(row["NISN"] || row["nisn"] || "").trim();
+          const nama = String(row["Nama Siswa"] || row["nama"] || row["Nama"] || "").trim();
+          const kelas = String(row["Kelas"] || row["kelas"] || "").trim();
+          const totalHadir = Number(row["Total Kehadiran Pagi"] || row["totalKehadiranPagi"] || 1);
+          const sangPagi = Number(row["Sangat Pagi (<06:30)"] || 0);
+          const terlambat = Number(row["Terlambat (>07:00)"] || 0);
+          const avgJam = String(row["Rata-Rata Jam Datang"] || "07:00").trim();
+
+          const matched = siswaList.find(
+            (s) => (nisn && s.nisn === nisn) || (nama && s.nama.toLowerCase() === nama.toLowerCase())
+          );
+
+          if (matched) {
+            const status: any = terlambat > 0 ? "Terlambat" : sangPagi > 0 ? "Sangat Pagi" : "Tepat Waktu";
+            const docId = `ked_${matched.id}_${targetDate}`;
+            payloads.push({
+              id: docId,
+              idSiswa: matched.id,
+              nisn: matched.nisn,
+              nis: matched.nis,
+              namaSiswa: matched.nama,
+              kelas: matched.kelas || kelas || "Kelas 1",
+              tanggal: targetDate,
+              jamDatang: avgJam || "07:00",
+              waktuTimestamp: Date.now(),
+              status,
+              statusKehadiran: "Hadir",
+              urutanKedatangan: idx + 1,
+              namaPetugas: currentUser?.nama || "Admin"
+            });
+          }
+        });
+
+        if (payloads.length === 0) {
+          notifySimpanError("Tidak ada data siswa yang cocok dengan database aplikasi.");
+          return;
+        }
+
+        await batchSaveDocuments(COLLECTIONS.PRESENSI_KEDATANGAN, payloads);
+        for (const p of payloads) {
+          const s = siswaList.find((st) => st.id === p.idSiswa);
+          if (s) {
+            await syncToClassAbsensi(s, targetDate, "Hadir");
+          }
+        }
+
+        notifySimpanSuccess(`Berhasil mengimpor & mengintegrasikan ${payloads.length} data rekap kehadiran pagi!`);
+      } catch (err: any) {
+        notifySimpanError("Gagal memproses file Excel: " + (err?.message || err));
+      }
+    };
+    reader.readAsBinaryString(file);
+    e.target.value = "";
+  };
+
   // Generate Piagam Penghargaan PDF for Top Students
   const downloadPiagamPDF = (juaraIndex: number) => {
     const studentData = rankingList[juaraIndex];
@@ -1425,13 +1531,36 @@ export const AbsenKedatanganPagiView: React.FC<AbsenKedatanganPagiViewProps> = (
         </div>
 
         {activeSubTab === "rekap" && (
-          <button
-            onClick={exportRekapToExcel}
-            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl flex items-center space-x-1.5 shadow-sm transition-colors cursor-pointer"
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span>Export Rekap Excel</span>
-          </button>
+          <div className="flex items-center space-x-2">
+            <button
+              type="button"
+              onClick={exportTemplateExcel}
+              className="px-3 py-2 bg-slate-700 hover:bg-slate-800 text-white font-bold text-xs rounded-xl flex items-center space-x-1.5 shadow-sm transition-colors cursor-pointer"
+              title="Unduh Template Excel sesuai Format Laporan"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Unduh Template</span>
+            </button>
+
+            <label className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl flex items-center space-x-1.5 shadow-sm transition-colors cursor-pointer" title="Impor Data Rekap Excel Sebelumnya">
+              <Download className="w-3.5 h-3.5 rotate-180" />
+              <span>Impor Rekap Excel</span>
+              <input
+                type="file"
+                accept=".xlsx, .xls"
+                onChange={handleImportRekapExcel}
+                className="hidden"
+              />
+            </label>
+
+            <button
+              onClick={exportRekapToExcel}
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl flex items-center space-x-1.5 shadow-sm transition-colors cursor-pointer"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Export Rekap Excel</span>
+            </button>
+          </div>
         )}
       </div>
 

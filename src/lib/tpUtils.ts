@@ -244,20 +244,18 @@ export function filterBankTpItems(
     }
   }
 
-  // 3. Flexible Class & Fase Matching
-  // Collect all matching items for this class (exact class number match, matching fase, or generic/all classes)
+  // 3. Strict Class Matching (Sesuai Kelas, Bukan Fase)
+  // Memastikan hanya mengambil TP dari kelas yang bersangkutan dan tidak tercampur kelas lain dalam satu fase.
   const classMatches: BankTpItem[] = [];
 
   semesterFiltered.forEach((item) => {
     const itemK = (item.kelas || "").toLowerCase().trim();
     const itemDigits = (itemK.match(/\d+/) || [""])[0];
-    const itemFase = (item.fase || "").toLowerCase().trim();
     const isSemuaKelas = !item.kelas || itemK === "semua kelas" || itemK === "semua" || itemK === "" || itemK === "semua fase";
 
     const isExactClass = classDigits && (itemDigits === classDigits || itemK === kelasLower || itemK.includes(kelasLower) || kelasLower.includes(itemK));
-    const isFaseMatch = itemFase && targetFase && itemFase === targetFase;
 
-    if (isExactClass || isFaseMatch || isSemuaKelas) {
+    if (isExactClass || isSemuaKelas) {
       if (!classMatches.some((existing) => existing.id === item.id)) {
         classMatches.push(item);
       }
