@@ -520,6 +520,16 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
     return siswaList.filter((s) => s.kelas === selectedKelas);
   }, [siswaList, selectedKelas]);
 
+  // Auto-reset selectedSiswaId if it doesn't exist in current class's students
+  useEffect(() => {
+    if (selectedSiswaId !== "all" && classStudents.length > 0) {
+      const exists = classStudents.some((s) => s.id === selectedSiswaId);
+      if (!exists) {
+        setSelectedSiswaId("all");
+      }
+    }
+  }, [classStudents, selectedSiswaId]);
+
   // Custom Mapels added manually and persisted locally & in Firestore
   const [customMapels, setCustomMapels] = useState<string[]>(() => {
     try {
@@ -2032,9 +2042,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
         format: [215, 330]
       });
 
-      const targetStudents = selectedSiswaId === "all"
-        ? classStudents
-        : classStudents.filter((s) => s.id === selectedSiswaId);
+      const targetStudents = studentsToPreview;
 
       if (targetStudents.length === 0) {
         Swal.fire("Peringatan", "Tidak ada siswa yang dipilih.", "warning");
@@ -2405,7 +2413,13 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
     if (selectedSiswaId === "all") {
       return classStudents[0] || null;
     }
-    return classStudents.find((s) => s.id === selectedSiswaId) || null;
+    return classStudents.find((s) => s.id === selectedSiswaId) || classStudents[0] || null;
+  }, [selectedSiswaId, classStudents]);
+
+  const studentsToPreview = useMemo(() => {
+    if (selectedSiswaId === "all") return classStudents;
+    const match = classStudents.filter((s) => s.id === selectedSiswaId);
+    return match.length > 0 ? match : classStudents;
   }, [selectedSiswaId, classStudents]);
 
   return (
@@ -2997,7 +3011,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
             </div>
           ) : (
             <div className="space-y-10 print:space-y-0">
-              {(selectedSiswaId === "all" ? classStudents : [selectedStudentData]).map((student, sIdx) => {
+              {studentsToPreview.map((student, sIdx) => {
                 if (!student) return null;
                 const studentRaport = getRaportForStudent(student);
 
