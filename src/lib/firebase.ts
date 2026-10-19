@@ -190,11 +190,32 @@ export const COLLECTIONS = {
   RAPORT_RECORDS: "raport_records"
 };
 
+type CollectionListener<T = any> = (data: T[]) => void;
+const activeCollectionListeners = new Map<string, Set<CollectionListener>>();
+
+export function broadcastCollectionData<T = any>(collectionName: string, data: T[]) {
+  const set = activeCollectionListeners.get(collectionName);
+  if (set) {
+    set.forEach((fn) => {
+      try {
+        fn(data);
+      } catch (err) {
+        console.error(`Error in broadcast listener for ${collectionName}:`, err);
+      }
+    });
+  }
+}
+
 // Generic Realtime Subscription with instant cache hydration, SWR with TTL, and anti-limit optimization
 export function subscribeCollection<T>(collectionName: string, callback: (data: T[]) => void) {
   const cacheKey = `edadmin_cache_${collectionName}`;
   let isUnsubscribed = false;
   let activeUnsubscribe: (() => void) | null = null;
+
+  if (!activeCollectionListeners.has(collectionName)) {
+    activeCollectionListeners.set(collectionName, new Set());
+  }
+  activeCollectionListeners.get(collectionName)!.add(callback as CollectionListener);
 
   // 1. Immediately emit cached data if available (instant offline/quota-proof display in 0ms)
   let cachedData: T[] | null = null;
@@ -378,6 +399,7 @@ export function subscribeCollection<T>(collectionName: string, callback: (data: 
 
   return () => {
     isUnsubscribed = true;
+    activeCollectionListeners.get(collectionName)?.delete(callback as CollectionListener);
     if (typeof document !== "undefined") {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     }
@@ -418,6 +440,7 @@ export async function saveDocument(collectionName: string, id: string, data: Rec
     }
     localStorage.setItem(cacheKey, JSON.stringify(list));
     markCollectionFresh(collectionName);
+    broadcastCollectionData(collectionName, list);
   } catch {}
 
   try {
@@ -446,6 +469,7 @@ export async function deleteDocument(collectionName: string, id: string) {
       list = list.filter((item) => item.id !== id);
       localStorage.setItem(cacheKey, JSON.stringify(list));
       markCollectionFresh(collectionName);
+      broadcastCollectionData(collectionName, list);
     }
   } catch {}
 
@@ -477,8 +501,10 @@ export async function batchSaveDocuments(collectionName: string, items: Array<{ 
       const clean = sanitizeData({ ...item, updatedAt: Date.now() });
       map.set(item.id, { ...(map.get(item.id) || {}), ...clean });
     });
-    localStorage.setItem(cacheKey, JSON.stringify(Array.from(map.values())));
+    const updatedList = Array.from(map.values());
+    localStorage.setItem(cacheKey, JSON.stringify(updatedList));
     markCollectionFresh(collectionName);
+    broadcastCollectionData(collectionName, updatedList);
   } catch {}
 
   try {

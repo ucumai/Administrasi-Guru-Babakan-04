@@ -49,7 +49,7 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
 import { Siswa, LogKedatangan, LogAbsensi, User, Pengaturan } from "../types";
-import { saveDocument, deleteDocument, COLLECTIONS } from "../lib/firebase";
+import { saveDocument, deleteDocument, batchSaveDocuments, COLLECTIONS } from "../lib/firebase";
 import { 
   getLocalDateStr, 
   getLocalTimeStr, 
@@ -192,6 +192,9 @@ export const AbsenKedatanganPagiView: React.FC<AbsenKedatanganPagiViewProps> = (
   const [selectedTanggal, setSelectedTanggal] = useState<string>(getCurrentDateStr());
   const [searchSiswa, setSearchSiswa] = useState<string>("");
   const [selectedKelasFilter, setSelectedKelasFilter] = useState<string>("");
+
+  // Local optimistic map to instantly display scanned/manual check-in with 0ms latency
+  const [localArrivalsMap, setLocalArrivalsMap] = useState<Map<string, LogKedatangan>>(new Map());
 
   // Live Device Clock state (ticks every second)
   const [liveDeviceDate, setLiveDeviceDate] = useState<Date>(new Date());
@@ -510,16 +513,31 @@ export const AbsenKedatanganPagiView: React.FC<AbsenKedatanganPagiViewProps> = (
     return Array.from(setK).sort();
   }, [siswaList]);
 
-  // Today's arrival logs
+  // Today's arrival logs (merging database state and optimistic local check-ins)
   const todayLogs = useMemo(() => {
-    return logKedatanganList.filter((log) => log.tanggal === selectedTanggal);
-  }, [logKedatanganList, selectedTanggal]);
+    const map = new Map<string, LogKedatangan>();
+    logKedatanganList.forEach((log) => {
+      if (log.tanggal === selectedTanggal) {
+        map.set(log.idSiswa, log);
+      }
+    });
 
-  // Map of today's present student IDs
+    localArrivalsMap.forEach((localLog, siswaId) => {
+      if (localLog.tanggal === selectedTanggal) {
+        map.set(siswaId, localLog);
+      }
+    });
+
+    return Array.from(map.values());
+  }, [logKedatanganList, selectedTanggal, localArrivalsMap]);
+
+  // Map of today's present student IDs (indexed by idSiswa, nisn, and nis)
   const todayPresentMap = useMemo(() => {
     const map = new Map<string, LogKedatangan>();
     todayLogs.forEach((log) => {
-      map.set(log.idSiswa, log);
+      if (log.idSiswa) map.set(log.idSiswa, log);
+      if (log.nisn) map.set(log.nisn, log);
+      if (log.nis) map.set(log.nis, log);
     });
     return map;
   }, [todayLogs]);
@@ -669,22 +687,25 @@ export const AbsenKedatanganPagiView: React.FC<AbsenKedatanganPagiViewProps> = (
       namaPetugas: currentUser?.nama || "Admin"
     };
 
+    // Optimistically update local state immediately so student appears present with 0ms delay
+    setLocalArrivalsMap((prev) => new Map(prev).set(matchedSiswa.id, payload));
+    setLastScannedResult({
+      siswa: matchedSiswa,
+      jamDatang: currentDeviceTime,
+      status,
+      urutan,
+      pesanSuara: voiceInfo.text,
+      badgeText: voiceInfo.badgeText,
+      category: voiceInfo.category,
+      timestamp: Date.now()
+    });
+    playBeep();
+    speakArrivalNotification(matchedSiswa.nama, urutan);
+    showToastSuccess(`✅ [Urutan #${urutan}] ${matchedSiswa.nama} (${matchedSiswa.kelas}) - ${currentDeviceTime} WIB`);
+
     try {
       await saveDocument(COLLECTIONS.PRESENSI_KEDATANGAN, docId, payload);
       await syncToClassAbsensi(matchedSiswa, targetDate, "Hadir");
-      setLastScannedResult({
-        siswa: matchedSiswa,
-        jamDatang: currentDeviceTime,
-        status,
-        urutan,
-        pesanSuara: voiceInfo.text,
-        badgeText: voiceInfo.badgeText,
-        category: voiceInfo.category,
-        timestamp: Date.now()
-      });
-      playBeep();
-      speakArrivalNotification(matchedSiswa.nama, urutan);
-      showToastSuccess(`✅ [Urutan #${urutan}] ${matchedSiswa.nama} (${matchedSiswa.kelas}) - ${currentDeviceTime} WIB`);
       return true;
     } catch (err: any) {
       notifySimpanError(err.message || "Gagal mencatat kedatangan.");
@@ -826,23 +847,26 @@ export const AbsenKedatanganPagiView: React.FC<AbsenKedatanganPagiViewProps> = (
       namaPetugas: currentUser?.nama || "Admin"
     };
 
+    // Optimistically update local state immediately
+    setLocalArrivalsMap((prev) => new Map(prev).set(matchedSiswa.id, payload));
+    setLastScannedResult({
+      siswa: matchedSiswa,
+      jamDatang: jamToUse,
+      status,
+      urutan,
+      pesanSuara: voiceInfo.text,
+      badgeText: voiceInfo.badgeText,
+      category: voiceInfo.category,
+      timestamp: Date.now()
+    });
+    playBeep();
+    speakArrivalNotification(matchedSiswa.nama, urutan);
+    setScanInput("");
+    showToastSuccess(`✅ [Urutan #${urutan}] ${matchedSiswa.nama} (${matchedSiswa.kelas}) - ${jamToUse} WIB (Tersinkron ke Absen Kelas)`);
+
     try {
       await saveDocument(COLLECTIONS.PRESENSI_KEDATANGAN, docId, payload);
       await syncToClassAbsensi(matchedSiswa, targetDate, "Hadir");
-      setLastScannedResult({
-        siswa: matchedSiswa,
-        jamDatang: jamToUse,
-        status,
-        urutan,
-        pesanSuara: voiceInfo.text,
-        badgeText: voiceInfo.badgeText,
-        category: voiceInfo.category,
-        timestamp: Date.now()
-      });
-      playBeep();
-      speakArrivalNotification(matchedSiswa.nama, urutan);
-      setScanInput("");
-      showToastSuccess(`✅ [Urutan #${urutan}] ${matchedSiswa.nama} (${matchedSiswa.kelas}) - ${jamToUse} WIB (Tersinkron ke Absen Kelas)`);
     } catch (err: any) {
       notifySimpanError(err.message || "Gagal mencatat kedatangan.");
     }
@@ -892,13 +916,16 @@ export const AbsenKedatanganPagiView: React.FC<AbsenKedatanganPagiViewProps> = (
       namaPetugas: currentUser?.nama || "Admin"
     };
 
+    // Optimistically update local state immediately
+    setLocalArrivalsMap((prev) => new Map(prev).set(siswa.id, payload));
+    const labelTipe = tipe === 'Hadir' 
+      ? `Hadir [Urutan #${urutanKedatangan || 1}] (${jamToUse} WIB)` 
+      : tipe.toUpperCase();
+    showToastSuccess(`✅ [${siswa.kelas}] ${siswa.nama} -> ${labelTipe} (Terintegrasi ke Absen Kelas)`);
+
     try {
       await saveDocument(COLLECTIONS.PRESENSI_KEDATANGAN, docId, payload);
       await syncToClassAbsensi(siswa, selectedTanggal, tipe);
-      const labelTipe = tipe === 'Hadir' 
-        ? `Hadir [Urutan #${urutanKedatangan || 1}] (${jamToUse} WIB)` 
-        : tipe.toUpperCase();
-      showToastSuccess(`✅ [${siswa.kelas}] ${siswa.nama} -> ${labelTipe} (Terintegrasi ke Absen Kelas)`);
     } catch (err: any) {
       notifySimpanError(err.message || "Gagal mencatat kedatangan.");
     }
@@ -911,6 +938,15 @@ export const AbsenKedatanganPagiView: React.FC<AbsenKedatanganPagiViewProps> = (
       `Hapus presensi pagi untuk ${siswa.nama}? Catatan absensi kelas hari ini juga akan disinkronkan kembali.`
     );
     if (ok) {
+      // Optimistically remove from local state immediately
+      setLocalArrivalsMap((prev) => {
+        const next = new Map(prev);
+        next.delete(siswa.id);
+        if (siswa.nisn) next.delete(siswa.nisn);
+        if (siswa.nis) next.delete(siswa.nis);
+        return next;
+      });
+
       try {
         await deleteDocument(COLLECTIONS.PRESENSI_KEDATANGAN, logId);
         await removeSyncedClassAbsensi(siswa.id, siswa.kelas, selectedTanggal);
@@ -933,30 +969,43 @@ export const AbsenKedatanganPagiView: React.FC<AbsenKedatanganPagiViewProps> = (
 
     const jamToUse = getCurrentTimeStr();
     const status = calculateArrivalStatus(jamToUse);
+    const payloads: LogKedatangan[] = [];
+
+    for (const s of unrecorded) {
+      const docId = `ked_${s.id}_${selectedTanggal}`;
+      const urutan = getOrAssignArrivalSequence(selectedTanggal, s.id);
+      const payload: LogKedatangan = {
+        id: docId,
+        idSiswa: s.id,
+        nisn: s.nisn,
+        nis: s.nis,
+        namaSiswa: s.nama,
+        kelas: s.kelas,
+        tanggal: selectedTanggal,
+        jamDatang: jamToUse,
+        waktuTimestamp: Date.now(),
+        status,
+        statusKehadiran: "Hadir",
+        urutanKedatangan: urutan,
+        namaPetugas: currentUser?.nama || "Admin"
+      };
+      payloads.push(payload);
+    }
+
+    // Optimistically update local state immediately
+    setLocalArrivalsMap((prev) => {
+      const next = new Map(prev);
+      payloads.forEach((p) => next.set(p.idSiswa, p));
+      return next;
+    });
+
+    notifySimpanSuccess(`Berhasil mencatat Hadir untuk ${unrecorded.length} siswa & disinkronkan ke Absen Kelas!`);
 
     try {
+      await batchSaveDocuments(COLLECTIONS.PRESENSI_KEDATANGAN, payloads);
       for (const s of unrecorded) {
-        const docId = `ked_${s.id}_${selectedTanggal}`;
-        const urutan = getOrAssignArrivalSequence(selectedTanggal, s.id);
-        const payload: LogKedatangan = {
-          id: docId,
-          idSiswa: s.id,
-          nisn: s.nisn,
-          nis: s.nis,
-          namaSiswa: s.nama,
-          kelas: s.kelas,
-          tanggal: selectedTanggal,
-          jamDatang: jamToUse,
-          waktuTimestamp: Date.now(),
-          status,
-          statusKehadiran: "Hadir",
-          urutanKedatangan: urutan,
-          namaPetugas: currentUser?.nama || "Admin"
-        };
-        await saveDocument(COLLECTIONS.PRESENSI_KEDATANGAN, docId, payload);
         await syncToClassAbsensi(s, selectedTanggal, "Hadir");
       }
-      notifySimpanSuccess(`Berhasil mencatat Hadir untuk ${unrecorded.length} siswa & disinkronkan ke Absen Kelas!`);
     } catch (err: any) {
       notifySimpanError(err.message || "Gagal melakukan presensi massal.");
     }
@@ -977,28 +1026,42 @@ export const AbsenKedatanganPagiView: React.FC<AbsenKedatanganPagiViewProps> = (
     if (!ok) return;
 
     const jamToUse = getCurrentTimeStr();
+    const payloads: LogKedatangan[] = [];
+
+    for (const s of unrecorded) {
+      const docId = `ked_${s.id}_${selectedTanggal}`;
+      const payload: LogKedatangan = {
+        id: docId,
+        idSiswa: s.id,
+        nisn: s.nisn,
+        nis: s.nis,
+        namaSiswa: s.nama,
+        kelas: s.kelas,
+        tanggal: selectedTanggal,
+        jamDatang: jamToUse,
+        waktuTimestamp: Date.now(),
+        status: "Alpa",
+        statusKehadiran: "Alpa",
+        catatan: "Alpa / Belum Hadir Saat Pintu Gerbang Ditutup",
+        namaPetugas: currentUser?.nama || "Admin"
+      };
+      payloads.push(payload);
+    }
+
+    // Optimistically update local state immediately
+    setLocalArrivalsMap((prev) => {
+      const next = new Map(prev);
+      payloads.forEach((p) => next.set(p.idSiswa, p));
+      return next;
+    });
+
+    notifySimpanSuccess(`Berhasil menandai ${unrecorded.length} siswa sebagai Alpa & disinkronkan ke Absen Kelas!`);
+
     try {
+      await batchSaveDocuments(COLLECTIONS.PRESENSI_KEDATANGAN, payloads);
       for (const s of unrecorded) {
-        const docId = `ked_${s.id}_${selectedTanggal}`;
-        const payload: LogKedatangan = {
-          id: docId,
-          idSiswa: s.id,
-          nisn: s.nisn,
-          nis: s.nis,
-          namaSiswa: s.nama,
-          kelas: s.kelas,
-          tanggal: selectedTanggal,
-          jamDatang: jamToUse,
-          waktuTimestamp: Date.now(),
-          status: "Alpa",
-          statusKehadiran: "Alpa",
-          catatan: "Alpa / Belum Hadir Saat Pintu Gerbang Ditutup",
-          namaPetugas: currentUser?.nama || "Admin"
-        };
-        await saveDocument(COLLECTIONS.PRESENSI_KEDATANGAN, docId, payload);
         await syncToClassAbsensi(s, selectedTanggal, "Alpa");
       }
-      notifySimpanSuccess(`Berhasil menandai ${unrecorded.length} siswa sebagai Alpa & disinkronkan ke Absen Kelas!`);
     } catch (err: any) {
       notifySimpanError(err.message || "Gagal menandai Alpa.");
     }
