@@ -65,7 +65,7 @@ import {
   confirmDeleteAlert 
 } from "../lib/swal";
 import Swal from "sweetalert2";
-import { filterBankTpItems, generateDynamicTpDescription } from "../lib/tpUtils";
+import { filterBankTpItems, generateDynamicTpDescription, getDefaultTpTemplateForMapel } from "../lib/tpUtils";
 
 interface CetakRaportViewProps {
   siswaList: Siswa[];
@@ -944,77 +944,31 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
   // Combine Bank TP from Firestore strictly filtered by selectedKelas
   const effectiveTpBank = useMemo(() => {
     const combined: Record<string, string[]> = {};
+    const allSubjects = Array.from(new Set([...activeMapelNames, ...DEFAULT_MAPEL_LIST]));
 
-    // 1. Initialize all active mapel names with empty arrays
-    activeMapelNames.forEach((m) => {
-      combined[m] = [];
-    });
-    DEFAULT_MAPEL_LIST.forEach((m) => {
-      if (!combined[m]) combined[m] = [];
-    });
+    allSubjects.forEach((m) => {
+      // 1. Filter Bank TP using 3 criteria: Mapel, selectedKelas, and active semester
+      const matchedItems = filterBankTpItems(bankTpList, m, selectedKelas, currentPeriodeInfo.semester);
+      let tps = matchedItems.map((item) => item.tujuanPembelajaran.trim()).filter(Boolean);
 
-    // 2. Merge Firestore Bank TP list (filtered strictly by active class)
-    if (bankTpList && bankTpList.length > 0) {
-      bankTpList.forEach((item) => {
-        if (!item.mapel || !item.tujuanPembelajaran) return;
-
-        // Strict class filter: verify match with selectedKelas
-        if (selectedKelas) {
-          const itemK = (item.kelas || "").toLowerCase().trim();
-          const selK = selectedKelas.toLowerCase().trim();
-
-          const isSemua = !item.kelas || itemK === "semua kelas" || itemK === "semua" || itemK === "";
-          const isMatch = isSemua || itemK === selK || itemK.includes(selK) || selK.includes(itemK);
-          if (!isMatch) return;
-        }
-
-        const tpText = item.tujuanPembelajaran.trim();
-
-        if (!combined[item.mapel]) {
-          combined[item.mapel] = [];
-        }
-        if (!combined[item.mapel].includes(tpText)) {
-          combined[item.mapel].push(tpText);
-        }
-
-        const itemMapelLower = item.mapel.toLowerCase().trim();
-        activeMapelNames.forEach((targetMapel) => {
-          const targetLower = targetMapel.toLowerCase().trim();
-          if (
-            targetLower === itemMapelLower ||
-            targetLower.includes(itemMapelLower) ||
-            itemMapelLower.includes(targetLower) ||
-            (itemMapelLower.includes("ipas") && targetLower.includes("ipas")) ||
-            (itemMapelLower.includes("pancasila") && targetLower.includes("pancasila")) ||
-            (itemMapelLower.includes("mtk") && (targetLower.includes("matematika") || targetLower.includes("mtk"))) ||
-            (itemMapelLower.includes("matematika") && targetLower.includes("matematika")) ||
-            (itemMapelLower.includes("indo") && targetLower.includes("indo")) ||
-            (itemMapelLower.includes("agama") && targetLower.includes("agama"))
-          ) {
-            if (!combined[targetMapel]) {
-              combined[targetMapel] = [];
-            }
-            if (!combined[targetMapel].includes(tpText)) {
-              combined[targetMapel].push(tpText);
-            }
-          }
-        });
-      });
-    }
-
-    // 3. Strict exclusion filter for blacklisted deleted TPs
-    Object.keys(combined).forEach((m) => {
+      // 2. Strict exclusion filter for blacklisted deleted TPs
       const deletedForThisMapel = (deletedTpTexts[m] || []).map((t) => t.toLowerCase().trim());
       const globalDeleted = (deletedTpTexts["_all_"] || []).map((t) => t.toLowerCase().trim());
-
-      combined[m] = combined[m].filter((tp) => {
+      tps = tps.filter((tp) => {
         const tpLower = tp.toLowerCase().trim();
         return !deletedForThisMapel.includes(tpLower) && !globalDeleted.includes(tpLower);
       });
+
+      // 3. Smart Fallback: if Bank TP is empty for this mapel & class, use default Kurikulum Merdeka templates
+      if (tps.length === 0) {
+        tps = [...getDefaultTpTemplateForMapel(m)];
+      }
+
+      combined[m] = tps;
     });
 
     return combined;
-  }, [bankTpList, activeMapelNames, deletedTpTexts, selectedKelas]);
+  }, [bankTpList, activeMapelNames, deletedTpTexts, selectedKelas, currentPeriodeInfo.semester]);
 
   const [isTpModalOpen, setIsTpModalOpen] = useState(false);
   const [activeTpMapel, setActiveTpMapel] = useState<string>(() => DEFAULT_MAPEL_LIST[0]);
@@ -1652,7 +1606,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
           const updatedNilaiMapel = currentRec.nilaiMapel.map((nm) => {
             const scoreVal = typeof nm.nilaiAkhir === "number" ? nm.nilaiAkhir : 80;
             const currentTps = effectiveTpBank[nm.mapel] || DEFAULT_TP_TEMPLATES[nm.mapel] || [];
-            const mapelBankItems = bankTpList?.filter((b) => b.mapel.toLowerCase() === nm.mapel.toLowerCase());
+            const mapelBankItems = filterBankTpItems(bankTpList, nm.mapel, selectedKelas, currentPeriodeInfo.semester);
             const desc = generateFallbackDeskripsiFromTp(nm.mapel, scoreVal, currentTps, mapelBankItems);
 
             return {
@@ -2109,12 +2063,22 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
           });
         const finalNilaiMapel = filteredNilaiMapel.length > 0 ? filteredNilaiMapel : studentRaport.nilaiMapel;
 
-        const tableBody = finalNilaiMapel.map((nm, i) => [
-          i + 1,
-          nm.mapel,
-          nm.nilaiAkhir,
-          nm.capaianKompetensiTinggi || nm.deskripsi || "-"
-        ]);
+        const tableBody = finalNilaiMapel.map((nm, i) => {
+          let descText = nm.capaianKompetensiTinggi || nm.deskripsi || "";
+          if (nm.capaianKompetensiPerluBimbingan) {
+            if (descText) {
+              descText = `${descText}\n\n* ${nm.capaianKompetensiPerluBimbingan}`;
+            } else {
+              descText = nm.capaianKompetensiPerluBimbingan;
+            }
+          }
+          return [
+            i + 1,
+            nm.mapel,
+            nm.nilaiAkhir,
+            descText || "-"
+          ];
+        });
 
         autoTable(doc, {
           startY: 60,
@@ -3351,7 +3315,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
                                       let currentBimbingan = nm.capaianKompetensiPerluBimbingan || "";
 
                                       if (autoSyncTpWithNilai || !currentTinggi) {
-                                        const mapelBankItems = bankTpList?.filter((b) => b.mapel.toLowerCase() === mName.toLowerCase());
+                                        const mapelBankItems = filterBankTpItems(bankTpList, mName, selectedKelas, currentPeriodeInfo.semester);
                                         const desc = generateFallbackDeskripsiFromTp(mName, clampedVal, currentTps, mapelBankItems);
                                         currentTinggi = desc.tinggi;
                                         currentBimbingan = desc.perluBimbingan;
@@ -3400,7 +3364,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
                                     type="button"
                                     onClick={() => {
                                       const scoreVal = typeof nm.nilaiAkhir === "number" ? nm.nilaiAkhir : 80;
-                                      const mapelBankItems = bankTpList?.filter((b) => b.mapel.toLowerCase() === mName.toLowerCase());
+                                      const mapelBankItems = filterBankTpItems(bankTpList, mName, selectedKelas, currentPeriodeInfo.semester);
                                       const desc = generateFallbackDeskripsiFromTp(mName, scoreVal, currentTps, mapelBankItems);
                                       const targetIdx = mOriginalIdx !== -1 ? mOriginalIdx : studentRaport.nilaiMapel.length;
                                       const updatedNilaiMapel = [...studentRaport.nilaiMapel];
@@ -3776,7 +3740,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
 
                                       // Otomatis menyesuaikan TP sesuai nilai yang diinput
                                       if (autoSyncTpWithNilai || !currentTinggi) {
-                                        const mapelBankItems = bankTpList?.filter((b) => b.mapel.toLowerCase() === nm.mapel.toLowerCase());
+                                        const mapelBankItems = filterBankTpItems(bankTpList, nm.mapel, selectedKelas, currentPeriodeInfo.semester);
                                         const desc = generateFallbackDeskripsiFromTp(nm.mapel, clampedVal, currentTps, mapelBankItems);
                                         currentTinggi = desc.tinggi;
                                         currentBimbingan = desc.perluBimbingan;
@@ -3826,7 +3790,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
                                     type="button"
                                     onClick={() => {
                                       const scoreVal = typeof nm.nilaiAkhir === "number" ? nm.nilaiAkhir : 80;
-                                      const mapelBankItems = bankTpList?.filter((b) => b.mapel.toLowerCase() === nm.mapel.toLowerCase());
+                                      const mapelBankItems = filterBankTpItems(bankTpList, nm.mapel, selectedKelas, currentPeriodeInfo.semester);
                                       const desc = generateFallbackDeskripsiFromTp(nm.mapel, scoreVal, currentTps, mapelBankItems);
                                       const updatedNilaiMapel = [...studentRaport.nilaiMapel];
                                       updatedNilaiMapel[mIdx] = {
@@ -4965,7 +4929,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
                   if (!student) return;
                   const score = tpPickerState.studentNilai ?? 80;
                   const mapelTps = effectiveTpBank[tpPickerState.mapel] || DEFAULT_TP_TEMPLATES[tpPickerState.mapel] || [];
-                  const mapelBankItems = bankTpList?.filter((b) => b.mapel.toLowerCase() === tpPickerState.mapel.toLowerCase());
+                  const mapelBankItems = filterBankTpItems(bankTpList, tpPickerState.mapel, selectedKelas, currentPeriodeInfo.semester);
                   const desc = generateFallbackDeskripsiFromTp(tpPickerState.mapel, score, mapelTps, mapelBankItems);
                   
                   const currentRec = getRaportForStudent(student);

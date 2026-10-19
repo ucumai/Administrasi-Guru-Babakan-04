@@ -65,6 +65,62 @@ export const DEFAULT_TP_TEMPLATES: Record<string, string[]> = {
   ]
 };
 
+/**
+ * Retrieve Kurikulum Merdeka default template TPs for any subject name with robust alias matching
+ */
+export function getDefaultTpTemplateForMapel(mapel: string): string[] {
+  if (!mapel) return [
+    "memahami konsep dasar dan materi pokok pembelajaran",
+    "menerapkan pemahaman dalam menyelesaikan tugas kontekstual",
+    "berpikir kritis dan menyajikan hasil pemikiran secara mandiri"
+  ];
+
+  if (DEFAULT_TP_TEMPLATES[mapel]) {
+    return DEFAULT_TP_TEMPLATES[mapel];
+  }
+
+  const mLower = mapel.toLowerCase().trim();
+
+  for (const [key, tps] of Object.entries(DEFAULT_TP_TEMPLATES)) {
+    const kLower = key.toLowerCase();
+    if (kLower === mLower) return tps;
+  }
+
+  if (mLower.includes("matematika") || mLower.includes("mtk") || mLower.includes("hitung")) {
+    return DEFAULT_TP_TEMPLATES["Matematika"];
+  }
+  if (mLower.includes("indo") || mLower.includes("bahasa indonesia")) {
+    return DEFAULT_TP_TEMPLATES["Bahasa Indonesia"];
+  }
+  if (mLower.includes("ipas") || mLower.includes("alam") || mLower.includes("ipa") || mLower.includes("ips")) {
+    return DEFAULT_TP_TEMPLATES["Ilmu Pengetahuan Alam dan Sosial (IPAS)"];
+  }
+  if (mLower.includes("pancasila") || mLower.includes("ppkn") || mLower.includes("kewarganegaraan")) {
+    return DEFAULT_TP_TEMPLATES["Pendidikan Pancasila"];
+  }
+  if (mLower.includes("agama") || mLower.includes("paibp") || mLower.includes("pabp") || mLower.includes("islam")) {
+    return DEFAULT_TP_TEMPLATES["Pendidikan Agama dan Budi Pekerti"];
+  }
+  if (mLower.includes("pjok") || mLower.includes("olahraga") || mLower.includes("penjas")) {
+    return DEFAULT_TP_TEMPLATES["Pendidikan Jasmani, Olahraga, dan Kesehatan (PJOK)"];
+  }
+  if (mLower.includes("seni") || mLower.includes("sbdp") || mLower.includes("prakarya") || mLower.includes("rupa") || mLower.includes("musik")) {
+    return DEFAULT_TP_TEMPLATES["Seni Budaya dan Prakarya"];
+  }
+  if (mLower.includes("inggris") || mLower.includes("english")) {
+    return DEFAULT_TP_TEMPLATES["Bahasa Inggris"];
+  }
+  if (mLower.includes("sunda") || mLower.includes("jawa") || mLower.includes("daerah") || mLower.includes("mulok") || mLower.includes("muatan lokal")) {
+    return DEFAULT_TP_TEMPLATES["Muatan Lokal (Bahasa Daerah)"];
+  }
+
+  return [
+    `memahami konsep dasar dan materi pokok ${mapel}`,
+    `menerapkan pemahaman ${mapel} dalam menyelesaikan tugas kontekstual`,
+    `berpikir kritis dan menyajikan hasil evaluasi materi ${mapel} secara mandiri`
+  ];
+}
+
 export function getFaseByClass(kelas: string): string {
   const k = (kelas || "").toLowerCase();
   if (k.includes("1") || k.includes("2") || k.includes("i ") || k.includes("ii ")) return "Fase A";
@@ -76,10 +132,16 @@ export function getFaseByClass(kelas: string): string {
   return "Fase B";
 }
 
+/**
+ * Clean and format TP text so it connects seamlessly to official report card phrases
+ * Example: "TP 1.1: Memahami operasi hitung..." -> "memahami operasi hitung..."
+ */
 export function cleanTpText(text: string, mapelFallback: string = ""): string {
   let t = (text || "").trim();
-  // Remove numbering or prefixes such as "1.1 ", "TP 1.1: ", "TP 1 - "
+  // Remove numbering or prefixes such as "1.1 ", "TP 1.1: ", "TP 1 - ", "1. "
   t = t.replace(/^(TP\s*[\d.]*[:\s-]*|\d+[\.\)]\s*)/i, "").trim();
+  // Remove common pedagogical prefixes like "Peserta didik mampu/dapat", "Siswa mampu/dapat", "Mampu", "Dapat"
+  t = t.replace(/^(peserta didik mampu|peserta didik dapat|siswa mampu|siswa dapat|mampu|dapat)\s+/i, "").trim();
   if (t.endsWith(".")) t = t.slice(0, -1);
   if (!t) return `konsep materi ${mapelFallback}`.trim();
   return t.charAt(0).toLowerCase() + t.slice(1);
@@ -87,6 +149,7 @@ export function cleanTpText(text: string, mapelFallback: string = ""): string {
 
 /**
  * Filter Bank TP Items using 3 criteria: Mapel, Kelas/Fase, and Semester
+ * Ensures 100% relevant descriptions with multi-tiered fallback
  */
 export function filterBankTpItems(
   bankTpList: BankTpItem[],
@@ -98,119 +161,179 @@ export function filterBankTpItems(
 
   const mapelLower = (mapel || "").toLowerCase().trim();
   const kelasLower = (kelas || "").toLowerCase().trim();
-  const semLower = (semester || "").toLowerCase().trim();
+  const rawSem = (semester || "").toLowerCase().trim();
+  const semLower = rawSem.includes("genap") || rawSem === "2" ? "genap" : rawSem.includes("ganjil") || rawSem === "1" ? "ganjil" : rawSem;
   const targetFase = getFaseByClass(kelas).toLowerCase().trim();
 
-  return bankTpList.filter((item) => {
-    // 1. Mapel filter (support aliases)
+  // Extract class numeric digits if any (e.g. "Kelas 4" -> "4")
+  const classDigits = (kelasLower.match(/\d+/) || [""])[0];
+
+  // 1. Filter by Mapel
+  const mapelMatches = bankTpList.filter((item) => {
     const itemMapel = (item.mapel || "").toLowerCase().trim();
-    const mapelMatch =
-      itemMapel === mapelLower ||
-      itemMapel.includes(mapelLower) ||
-      mapelLower.includes(itemMapel) ||
-      (mapelLower.includes("ipas") && itemMapel.includes("ipas")) ||
-      (mapelLower.includes("pancasila") && itemMapel.includes("pancasila")) ||
-      (mapelLower.includes("matematika") && (itemMapel.includes("matematika") || itemMapel.includes("mtk"))) ||
-      (mapelLower.includes("agama") && itemMapel.includes("agama"));
-
-    if (!mapelMatch) return false;
-
-    // 2. Kelas / Fase filter
-    const itemKelas = (item.kelas || "").toLowerCase().trim();
-    const itemFase = (item.fase || "").toLowerCase().trim();
-    const isSemuaKelas = !item.kelas || itemKelas === "semua kelas" || itemKelas === "semua" || itemKelas === "";
-
-    const classMatch =
-      isSemuaKelas ||
-      itemKelas === kelasLower ||
-      itemKelas.includes(kelasLower) ||
-      kelasLower.includes(itemKelas) ||
-      (itemFase && itemFase === targetFase);
-
-    if (!classMatch) return false;
-
-    // 3. Semester filter
-    if (semLower && semLower !== "semua") {
-      const itemSem = (item.semester || "").toLowerCase().trim();
-      const isSemuaSem = !item.semester || itemSem === "semua" || itemSem === "semua semester" || itemSem === "";
-      const semesterMatch = isSemuaSem || itemSem === semLower || itemSem.includes(semLower);
-      if (!semesterMatch) return false;
-    }
-
-    return true;
+    if (itemMapel === mapelLower || itemMapel.includes(mapelLower) || mapelLower.includes(itemMapel)) return true;
+    if (mapelLower.includes("ipas") && itemMapel.includes("ipas")) return true;
+    if (mapelLower.includes("pancasila") && (itemMapel.includes("pancasila") || itemMapel.includes("ppkn"))) return true;
+    if (mapelLower.includes("matematika") && (itemMapel.includes("matematika") || itemMapel.includes("mtk"))) return true;
+    if (mapelLower.includes("agama") && (itemMapel.includes("agama") || itemMapel.includes("paibp") || itemMapel.includes("pabp"))) return true;
+    if (mapelLower.includes("pjok") && (itemMapel.includes("pjok") || itemMapel.includes("olahraga") || itemMapel.includes("penjas"))) return true;
+    if (mapelLower.includes("seni") && (itemMapel.includes("seni") || itemMapel.includes("sbdp"))) return true;
+    if (mapelLower.includes("inggris") && (itemMapel.includes("inggris") || itemMapel.includes("english"))) return true;
+    if (mapelLower.includes("daerah") && (itemMapel.includes("daerah") || itemMapel.includes("sunda") || itemMapel.includes("jawa") || itemMapel.includes("mulok"))) return true;
+    return false;
   });
+
+  if (mapelMatches.length === 0) return [];
+
+  // 2. Filter by Semester (if specified and not "semua")
+  let semesterFiltered = mapelMatches;
+  if (semLower && semLower !== "semua") {
+    const exactSem = mapelMatches.filter((item) => {
+      const itemSem = (item.semester || "").toLowerCase().trim();
+      return itemSem === semLower || (semLower === "ganjil" && (itemSem.includes("ganjil") || itemSem === "1")) || (semLower === "genap" && (itemSem.includes("genap") || itemSem === "2"));
+    });
+    // If exact semester matches exist, prefer them; otherwise allow "semua"
+    if (exactSem.length > 0) {
+      semesterFiltered = exactSem;
+    } else {
+      semesterFiltered = mapelMatches.filter((item) => {
+        const itemSem = (item.semester || "").toLowerCase().trim();
+        return !item.semester || itemSem === "semua" || itemSem === "semua semester" || itemSem === "";
+      });
+      if (semesterFiltered.length === 0) semesterFiltered = mapelMatches;
+    }
+  }
+
+  // 3. Filter by Kelas / Fase
+  // Tier A: Exact class number match (e.g. both refer to class 4)
+  if (classDigits) {
+    const exactClassItems = semesterFiltered.filter((item) => {
+      const itemK = (item.kelas || "").toLowerCase().trim();
+      const itemDigits = (itemK.match(/\d+/) || [""])[0];
+      return itemDigits === classDigits;
+    });
+    if (exactClassItems.length > 0) {
+      return exactClassItems;
+    }
+  }
+
+  // Tier B: Fase match (e.g. Fase B for Kelas 3 & 4)
+  const faseItems = semesterFiltered.filter((item) => {
+    const itemFase = (item.fase || "").toLowerCase().trim();
+    return itemFase && itemFase === targetFase;
+  });
+  if (faseItems.length > 0) {
+    return faseItems;
+  }
+
+  // Tier C: "Semua Kelas" or generic items
+  const genericItems = semesterFiltered.filter((item) => {
+    const itemK = (item.kelas || "").toLowerCase().trim();
+    return !item.kelas || itemK === "semua kelas" || itemK === "semua" || itemK === "";
+  });
+  if (genericItems.length > 0) {
+    return genericItems;
+  }
+
+  // Fallback to all matching mapel & semester items
+  return semesterFiltered;
 }
 
 /**
- * Dynamic Score-to-TP Mapping (Pemetaan Dinamis Berdasarkan Nilai Siswa)
+ * Smart Multi-TP Auto-Concatenation
+ * Menggabungkan seluruh TP menjadi satu rangkaian kalimat rapi menggunakan konjungsi Bahasa Indonesia:
+ * - 1 TP: "...memahami operasi hitung bilangan cacah"
+ * - 2 TP: "...memahami operasi hitung bilangan cacah serta menyelesaikan masalah kontekstual pecahan"
+ * - 3+ TP: "...memahami operasi hitung bilangan cacah, menyelesaikan masalah kontekstual pecahan, serta mengukur keliling dan luas bangun datar"
+ */
+export function concatenateTpTexts(tpList: string[], mapelFallback: string = ""): string {
+  if (!tpList || tpList.length === 0) {
+    const defaultTemplates = getDefaultTpTemplateForMapel(mapelFallback);
+    return concatenateTpTexts(defaultTemplates, mapelFallback);
+  }
+
+  // Clean each TP and filter empty or duplicate entries
+  const cleaned: string[] = [];
+  tpList.forEach((text) => {
+    const c = cleanTpText(text, mapelFallback);
+    if (c && !cleaned.includes(c)) {
+      cleaned.push(c);
+    }
+  });
+
+  if (cleaned.length === 0) {
+    return `konsep materi pokok ${mapelFallback}`.trim();
+  }
+
+  if (cleaned.length === 1) {
+    return cleaned[0];
+  }
+
+  if (cleaned.length === 2) {
+    return `${cleaned[0]} serta ${cleaned[1]}`;
+  }
+
+  // 3 or more TPs
+  const allExceptLast = cleaned.slice(0, -1).join(", ");
+  const last = cleaned[cleaned.length - 1];
+  return `${allExceptLast}, serta ${last}`;
+}
+
+/**
+ * Simple Multi-TP Auto-Concatenation & KKTP-Based Score Mapping
+ *
+ * Logika Deskripsi Rapor Berdasarkan Standar Ketuntasan (KKTP = 75):
+ * • Nilai >= KKTP (Tuntas):
+ *   - Capaian Tertinggi:
+ *     "Menunjukkan penguasaan sangat baik dalam [Daftar Seluruh TP dari Bank TP Kelas]."
+ *   - Perlu Peningkatan / Bimbingan:
+ *     "Pertahankan prestasi dan tingkatkan kemandirian dalam pendalaman [Daftar Seluruh TP dari Bank TP Kelas]."
+ * • Nilai < KKTP (Belum Tuntas / Remedial):
+ *   - Capaian Tertinggi:
+ *     "Menunjukkan kemauan belajar dan pemahaman dasar dalam [Daftar Seluruh TP dari Bank TP Kelas]."
+ *   - Perlu Peningkatan / Bimbingan:
+ *     "Perlu peningkatan konsistensi pemahaman dan pendampingan dalam [Daftar Seluruh TP dari Bank TP Kelas]."
  */
 export function generateDynamicTpDescription(
   mapel: string,
   nilaiNum: number,
   tpTexts?: string[],
-  bankItems?: BankTpItem[]
+  bankItems?: BankTpItem[],
+  kktp: number = 75
 ): { tinggi: string; perluBimbingan: string } {
-  let tpBest = "";
-  let tpSecond = "";
-  let tpNeedHelp = "";
+  // 1. Ambil seluruh TP yang diajarkan pada Mata Pelajaran & Kelas tersebut dari Bank TP
+  let rawList: string[] = [];
 
-  const availableBank = bankItems && bankItems.length > 0 ? bankItems : [];
-
-  if (availableBank.length > 0) {
-    const tinggiItems = availableBank.filter((b) => b.kategori === "Tinggi");
-    const sedangItems = availableBank.filter((b) => b.kategori === "Sedang" || b.kategori === "Umum");
-    const bimbinganItems = availableBank.filter((b) => b.kategori === "Bimbingan");
-
-    if (nilaiNum >= 90) {
-      tpBest = tinggiItems[0]?.tujuanPembelajaran || availableBank[0]?.tujuanPembelajaran;
-      tpSecond = tinggiItems[1]?.tujuanPembelajaran || sedangItems[0]?.tujuanPembelajaran || tpBest;
-      tpNeedHelp = sedangItems[sedangItems.length - 1]?.tujuanPembelajaran || bimbinganItems[0]?.tujuanPembelajaran || tpBest;
-    } else if (nilaiNum >= 80) {
-      tpBest = tinggiItems[0]?.tujuanPembelajaran || sedangItems[0]?.tujuanPembelajaran || availableBank[0]?.tujuanPembelajaran;
-      tpNeedHelp = bimbinganItems[0]?.tujuanPembelajaran || sedangItems[0]?.tujuanPembelajaran || tpBest;
-    } else if (nilaiNum >= 75) {
-      tpBest = sedangItems[0]?.tujuanPembelajaran || tinggiItems[0]?.tujuanPembelajaran || availableBank[0]?.tujuanPembelajaran;
-      tpNeedHelp = bimbinganItems[0]?.tujuanPembelajaran || sedangItems[0]?.tujuanPembelajaran || tpBest;
-    } else {
-      tpBest = bimbinganItems[0]?.tujuanPembelajaran || sedangItems[0]?.tujuanPembelajaran || availableBank[0]?.tujuanPembelajaran;
-      tpNeedHelp = bimbinganItems[1]?.tujuanPembelajaran || bimbinganItems[0]?.tujuanPembelajaran || tpBest;
-    }
+  if (bankItems && bankItems.length > 0) {
+    rawList = bankItems
+      .map((b) => b.tujuanPembelajaran)
+      .filter((t) => typeof t === "string" && t.trim().length > 0);
   }
 
-  // Smart Fallback to tpTexts array or DEFAULT_TP_TEMPLATES if bankItems yield nothing
-  const rawList = tpTexts && tpTexts.length > 0 ? tpTexts : (DEFAULT_TP_TEMPLATES[mapel] || [
-    `memahami konsep dasar dan materi pokok ${mapel}`,
-    `menerapkan pemahaman dalam menyelesaikan tugas kontekstual`,
-    `berpikir kritis dan menyajikan hasil pemikiran secara mandiri`
-  ]);
+  // 2. Smart Fallback: gunakan tpTexts atau template resmi bawaan jika Bank TP belum diisi
+  if (rawList.length === 0 && tpTexts && tpTexts.length > 0) {
+    rawList = tpTexts.filter((t) => typeof t === "string" && t.trim().length > 0);
+  }
 
-  if (!tpBest) tpBest = rawList[0] || `konsep utama ${mapel}`;
-  if (!tpSecond) tpSecond = rawList[1] || tpBest;
-  if (!tpNeedHelp) tpNeedHelp = rawList[rawList.length - 1] || tpBest;
+  if (rawList.length === 0) {
+    rawList = getDefaultTpTemplateForMapel(mapel);
+  }
 
-  const cBest = cleanTpText(tpBest, mapel);
-  const cNeedHelp = cleanTpText(tpNeedHelp, mapel);
+  // 3. Gabungkan seluruh TP secara alami (Smart Concatenation)
+  const joinedTps = concatenateTpTexts(rawList, mapel);
 
-  // Official report card sentence formatting
-  let tinggiText = "";
-  let bimbinganText = "";
+  // 4. Standar Ketuntasan (KKTP)
+  const isTuntas = Number(nilaiNum) >= kktp;
 
-  if (nilaiNum >= 90) {
-    tinggiText = `Menunjukkan penguasaan sangat baik dalam ${cBest}. Mampu bernalar kritis secara mandiri.`;
-    bimbinganText = `Pertahankan prestasi unggul dan tingkatkan pengayaan mandiri pada pendalaman ${cNeedHelp}.`;
-  } else if (nilaiNum >= 80) {
-    tinggiText = `Menunjukkan penguasaan sangat baik dalam ${cBest}.`;
-    bimbinganText = `Perlu peningkatan konsistensi pemahaman dan pendampingan dalam ${cNeedHelp}.`;
-  } else if (nilaiNum >= 75) {
-    tinggiText = `Menunjukkan pemahaman yang baik dan telah mencapai kriteria ketuntasan dalam ${cBest}.`;
-    bimbinganText = `Perlu peningkatan konsistensi pemahaman dan pendampingan dalam ${cNeedHelp}.`;
+  if (isTuntas) {
+    return {
+      tinggi: `Menunjukkan penguasaan sangat baik dalam ${joinedTps}.`,
+      perluBimbingan: `Pertahankan prestasi dan tingkatkan kemandirian dalam pendalaman ${joinedTps}.`
+    };
   } else {
-    tinggiText = `Menunjukkan kemauan belajar pada pengenalan ${cBest}.`;
-    bimbinganText = `Perlu peningkatan konsistensi pemahaman dan pendampingan dalam ${cNeedHelp}.`;
+    return {
+      tinggi: `Menunjukkan kemauan belajar dan pemahaman dasar dalam ${joinedTps}.`,
+      perluBimbingan: `Perlu peningkatan konsistensi pemahaman dan pendampingan dalam ${joinedTps}.`
+    };
   }
-
-  return {
-    tinggi: tinggiText,
-    perluBimbingan: bimbinganText
-  };
 }

@@ -66,7 +66,9 @@ export const InputPenilaianView: React.FC<InputPenilaianViewProps> = ({
 
   // Map of student grades: { studentId: number | "" }
   const [gradesMap, setGradesMap] = useState<Record<string, number | "">>({});
-  // Map of customized student descriptions: { studentId: string }
+  // Maps of customized student descriptions: { studentId: string }
+  const [customDescTinggiMap, setCustomDescTinggiMap] = useState<Record<string, string>>({});
+  const [customDescBimbinganMap, setCustomDescBimbinganMap] = useState<Record<string, string>>({});
   const [customDescMap, setCustomDescMap] = useState<Record<string, string>>({});
 
   const allowedClasses = getAllowedClasses(currentUser, siswaList.map((s) => s.kelas));
@@ -154,7 +156,7 @@ export const InputPenilaianView: React.FC<InputPenilaianViewProps> = ({
     }
   }, [availableTps, selectedMapel]);
 
-  // Load existing grade records from nilaiList
+  // Load existing grade records and saved raport descriptions
   useEffect(() => {
     const effectiveMapel = selectedMapel || (isGuruKelas ? "Tematik / Guru Kelas" : "");
     if (selectedKelas && (effectiveMapel || isGuruKelas) && jenisPenilaian) {
@@ -162,63 +164,87 @@ export const InputPenilaianView: React.FC<InputPenilaianViewProps> = ({
         (n) => n.kelas === selectedKelas && (n.mapel === effectiveMapel || (isGuruKelas && !n.mapel)) && n.jenis === jenisPenilaian
       );
 
+      let savedCachedRaport: Record<string, any> = {};
+      try {
+        const raw = localStorage.getItem("edadmin_persisted_raport_records");
+        if (raw) savedCachedRaport = JSON.parse(raw);
+      } catch {}
+
+      const cleanTahun = (config?.Tahun_Ajaran || "2024/2025").replace(/\//g, "-");
+      const periode = config?.Semester === "Genap" ? "Semester 2 (Genap)" : "Semester 1 (Ganjil)";
+
       const mapG: Record<string, number | ""> = {};
+      const mapTinggi: Record<string, string> = {};
+      const mapBimbingan: Record<string, string> = {};
       const mapD: Record<string, string> = {};
 
       studentsInClass.forEach((s) => {
         const found = existingGrades.find((g) => g.idSiswa === s.id || g.idSiswa === s.nisn);
         if (found && found.nilai !== "" && found.nilai !== undefined) {
           mapG[s.id] = found.nilai;
-          if (found.deskripsi) {
-            mapD[s.id] = found.deskripsi;
-          }
         } else {
           mapG[s.id] = "";
+        }
+
+        // Check if existing raport record has custom descriptions for this mapel
+        const docId = `raport_${s.id}_${cleanTahun}_${periode}`;
+        const altDocId = `raport_${s.id}_${periode}_${cleanTahun}`;
+        const legacyId = `raport_${s.id}_${periode}`;
+        const rRec = savedCachedRaport[docId] || savedCachedRaport[altDocId] || savedCachedRaport[legacyId];
+        const matchedMapel = rRec?.nilaiMapel?.find((nm: any) => nm.mapel?.toLowerCase() === effectiveMapel.toLowerCase());
+
+        if (matchedMapel?.capaianKompetensiTinggi) {
+          mapTinggi[s.id] = matchedMapel.capaianKompetensiTinggi;
+          mapD[s.id] = matchedMapel.capaianKompetensiTinggi;
+        } else if (found?.deskripsi) {
+          mapTinggi[s.id] = found.deskripsi;
+          mapD[s.id] = found.deskripsi;
+        }
+
+        if (matchedMapel?.capaianKompetensiPerluBimbingan) {
+          mapBimbingan[s.id] = matchedMapel.capaianKompetensiPerluBimbingan;
         }
       });
 
       setGradesMap(mapG);
+      setCustomDescTinggiMap(mapTinggi);
+      setCustomDescBimbinganMap(mapBimbingan);
       setCustomDescMap(mapD);
     }
-  }, [selectedKelas, selectedMapel, jenisPenilaian, nilaiList, studentsInClass, isGuruKelas]);
+  }, [selectedKelas, selectedMapel, jenisPenilaian, nilaiList, studentsInClass, isGuruKelas, config?.Tahun_Ajaran, config?.Semester]);
 
-  // Helper to generate dynamic TP achievement description based on grade
-  const getAutoTpDescription = (grade: number | "", tpText: string) => {
+  // Helper to generate dynamic TP achievement descriptions (both Tinggi & Bimbingan) based on grade
+  const getAutoTpDescriptions = (grade: number | "", tpText: string) => {
     if (grade === "" || isNaN(Number(grade))) {
-      return "";
+      return { tinggi: "", perluBimbingan: "" };
     }
     const val = Number(grade);
     const currentSemester = config?.Semester || "Ganjil";
     const filteredBank = filterBankTpItems(bankTpList, selectedMapel, selectedKelas, currentSemester);
-    const dynamicDesc = generateDynamicTpDescription(
+    const fallbackTps = availableTps.map((a) => a.text).filter(Boolean);
+    return generateDynamicTpDescription(
       selectedMapel,
       val,
-      tpText ? [tpText] : [],
-      filteredBank
+      fallbackTps.length > 0 ? fallbackTps : (tpText ? [tpText] : []),
+      filteredBank,
+      75
     );
-    return dynamicDesc.tinggi;
   };
 
   // Helper for grade badge styling & tier
   const getGradeTier = (grade: number | "") => {
     if (grade === "" || isNaN(Number(grade))) return null;
     const num = Number(grade);
-    if (num >= 90) {
+    if (num >= 85) {
       return {
         label: "Sangat Baik (Optimal)",
         badgeClass: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700",
         icon: "✨"
       };
-    } else if (num >= 80) {
-      return {
-        label: "Baik (Tercapai)",
-        badgeClass: "bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300 border-blue-300 dark:border-blue-700",
-        icon: "✓"
-      };
     } else if (num >= 75) {
       return {
-        label: "Cukup (KKTP)",
-        badgeClass: "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border-amber-300 dark:border-amber-700",
+        label: "Baik (Tercapai / KKTP)",
+        badgeClass: "bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300 border-blue-300 dark:border-blue-700",
         icon: "✓"
       };
     } else {
@@ -233,15 +259,25 @@ export const InputPenilaianView: React.FC<InputPenilaianViewProps> = ({
   const handleGradeChange = (studentId: string, value: string) => {
     const num = value === "" ? "" : Math.min(100, Math.max(0, Number(value)));
     setGradesMap((prev) => ({ ...prev, [studentId]: num }));
+  };
 
-    // Reset custom description override so the dynamic auto description takes effect
-    if (customDescMap[studentId]) {
-      setCustomDescMap((prev) => {
-        const next = { ...prev };
-        delete next[studentId];
-        return next;
-      });
-    }
+  // Quick reset to auto-generated Bank TP description
+  const handleResetTpDescription = (studentId: string) => {
+    setCustomDescTinggiMap((prev) => {
+      const next = { ...prev };
+      delete next[studentId];
+      return next;
+    });
+    setCustomDescBimbinganMap((prev) => {
+      const next = { ...prev };
+      delete next[studentId];
+      return next;
+    });
+    setCustomDescMap((prev) => {
+      const next = { ...prev };
+      delete next[studentId];
+      return next;
+    });
   };
 
   const handleQuickFillAll = (presetVal: number | "") => {
@@ -250,7 +286,19 @@ export const InputPenilaianView: React.FC<InputPenilaianViewProps> = ({
       nextMap[s.id] = presetVal;
     });
     setGradesMap(nextMap);
+  };
+
+  const handleResetAllDescriptions = () => {
+    setCustomDescTinggiMap({});
+    setCustomDescBimbinganMap({});
     setCustomDescMap({});
+    Swal.fire({
+      icon: "success",
+      title: "TP Disesuaikan!",
+      text: "Seluruh deskripsi TP siswa berhasil dikembalikan ke pemetaan otomatis Bank TP sesuai nilai.",
+      timer: 1500,
+      showConfirmButton: false
+    });
   };
 
   // Save Nilai & TP Achievement to Firebase
@@ -271,8 +319,9 @@ export const InputPenilaianView: React.FC<InputPenilaianViewProps> = ({
     const itemsToSave: DataNilai[] = studentsInClass.map((s) => {
       const docId = `${selectedKelas}_${mapelToSave}_${jenisPenilaian}_${s.id}`;
       const gradeVal = gradesMap[s.id] !== undefined ? gradesMap[s.id] : "";
-      const autoDesc = getAutoTpDescription(gradeVal, selectedTp);
-      const finalDesc = customDescMap[s.id] || autoDesc;
+      const autoDescs = getAutoTpDescriptions(gradeVal, selectedTp);
+      const finalTinggi = customDescTinggiMap[s.id] !== undefined ? customDescTinggiMap[s.id] : (customDescMap[s.id] || autoDescs.tinggi);
+      const finalBimbingan = customDescBimbinganMap[s.id] !== undefined ? customDescBimbinganMap[s.id] : autoDescs.perluBimbingan;
 
       return {
         id: docId,
@@ -284,7 +333,9 @@ export const InputPenilaianView: React.FC<InputPenilaianViewProps> = ({
         namaSiswa: s.nama,
         nilai: gradeVal,
         tp: selectedTp,
-        deskripsi: finalDesc,
+        deskripsi: finalTinggi,
+        capaianKompetensiTinggi: finalTinggi,
+        capaianKompetensiPerluBimbingan: finalBimbingan,
         namaGuru: config.Nama_Guru || "Guru",
         updatedAt: Date.now()
       };
@@ -337,8 +388,9 @@ export const InputPenilaianView: React.FC<InputPenilaianViewProps> = ({
               nipKepsek: config.NIP_Kepsek || "197002111993081001"
             };
 
-            const autoDesc = getAutoTpDescription(gradeVal, selectedTp);
-            const finalDesc = customDescMap[s.id] || autoDesc;
+            const autoDescs = getAutoTpDescriptions(gradeVal, selectedTp);
+            const finalTinggi = customDescTinggiMap[s.id] !== undefined ? customDescTinggiMap[s.id] : (customDescMap[s.id] || autoDescs.tinggi);
+            const finalBimbingan = customDescBimbinganMap[s.id] !== undefined ? customDescBimbinganMap[s.id] : autoDescs.perluBimbingan;
 
             const updatedNilaiMapel = [...(currentRec.nilaiMapel || [])];
             const existIdx = updatedNilaiMapel.findIndex(
@@ -349,18 +401,18 @@ export const InputPenilaianView: React.FC<InputPenilaianViewProps> = ({
               updatedNilaiMapel[existIdx] = {
                 ...updatedNilaiMapel[existIdx],
                 nilaiAkhir: gradeVal,
-                capaianKompetensiTinggi: gradeVal >= 75 ? finalDesc : updatedNilaiMapel[existIdx].capaianKompetensiTinggi,
-                capaianKompetensiPerluBimbingan: gradeVal < 75 ? finalDesc : updatedNilaiMapel[existIdx].capaianKompetensiPerluBimbingan,
-                deskripsi: finalDesc
+                capaianKompetensiTinggi: finalTinggi,
+                capaianKompetensiPerluBimbingan: finalBimbingan,
+                deskripsi: finalTinggi
               };
             } else {
               updatedNilaiMapel.push({
                 mapel: mapelToSave,
                 kktp: 75,
                 nilaiAkhir: gradeVal,
-                capaianKompetensiTinggi: gradeVal >= 75 ? finalDesc : "",
-                capaianKompetensiPerluBimbingan: gradeVal < 75 ? finalDesc : "",
-                deskripsi: finalDesc
+                capaianKompetensiTinggi: finalTinggi,
+                capaianKompetensiPerluBimbingan: finalBimbingan,
+                deskripsi: finalTinggi
               });
             }
 
@@ -461,8 +513,9 @@ export const InputPenilaianView: React.FC<InputPenilaianViewProps> = ({
             nipKepsek: config.NIP_Kepala_Sekolah || "197002111993081001"
           };
 
-          const autoDesc = getAutoTpDescription(gradeVal, selectedTp);
-          const finalDesc = customDescMap[s.id] || autoDesc;
+          const autoDescs = getAutoTpDescriptions(gradeVal, selectedTp);
+          const finalTinggi = customDescTinggiMap[s.id] !== undefined ? customDescTinggiMap[s.id] : (customDescMap[s.id] || autoDescs.tinggi);
+          const finalBimbingan = customDescBimbinganMap[s.id] !== undefined ? customDescBimbinganMap[s.id] : autoDescs.perluBimbingan;
 
           const updatedNilaiMapel = [...currentRec.nilaiMapel];
           const existIdx = updatedNilaiMapel.findIndex(
@@ -473,18 +526,18 @@ export const InputPenilaianView: React.FC<InputPenilaianViewProps> = ({
             updatedNilaiMapel[existIdx] = {
               ...updatedNilaiMapel[existIdx],
               nilaiAkhir: gradeVal,
-              capaianKompetensiTinggi: gradeVal >= 75 ? finalDesc : updatedNilaiMapel[existIdx].capaianKompetensiTinggi,
-              capaianKompetensiPerluBimbingan: gradeVal < 75 ? finalDesc : updatedNilaiMapel[existIdx].capaianKompetensiPerluBimbingan,
-              deskripsi: finalDesc
+              capaianKompetensiTinggi: finalTinggi,
+              capaianKompetensiPerluBimbingan: finalBimbingan,
+              deskripsi: finalTinggi
             };
           } else {
             updatedNilaiMapel.push({
               mapel: mapelToSave,
               kktp: 75,
               nilaiAkhir: gradeVal,
-              capaianKompetensiTinggi: gradeVal >= 75 ? finalDesc : "",
-              capaianKompetensiPerluBimbingan: gradeVal < 75 ? finalDesc : "",
-              deskripsi: finalDesc
+              capaianKompetensiTinggi: finalTinggi,
+              capaianKompetensiPerluBimbingan: finalBimbingan,
+              deskripsi: finalTinggi
             });
           }
 
@@ -728,6 +781,15 @@ export const InputPenilaianView: React.FC<InputPenilaianViewProps> = ({
             >
               Kosongkan
             </button>
+            <button
+              type="button"
+              onClick={handleResetAllDescriptions}
+              className="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 cursor-pointer flex items-center gap-1"
+              title="Sesuaikan ulang seluruh deskripsi TP dengan nilai & Bank TP kelas ini"
+            >
+              <span>⚡</span>
+              <span>Sesuaikan Ulang TP Bank</span>
+            </button>
           </div>
 
           <div className="flex items-center gap-3">
@@ -763,9 +825,9 @@ export const InputPenilaianView: React.FC<InputPenilaianViewProps> = ({
             <thead className="bg-slate-100 dark:bg-slate-900 text-slate-600 dark:text-slate-400 uppercase font-bold border-b border-slate-200 dark:border-slate-700">
               <tr>
                 <th className="p-3 text-center w-12">No</th>
-                <th className="p-3 w-56">Nama Lengkap Siswa</th>
-                <th className="p-3 text-center w-32">Nilai (0-100)</th>
-                <th className="p-3">Ketercapaian TP & Deskripsi Otomatis (Sesuai Nilai)</th>
+                <th className="p-3 w-52">Nama Lengkap Siswa</th>
+                <th className="p-3 text-center w-28">Nilai (0-100)</th>
+                <th className="p-3">Auto-Sync & Smart TP Mapping (Capaian Tertinggi & Perlu Bimbingan)</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
@@ -786,8 +848,14 @@ export const InputPenilaianView: React.FC<InputPenilaianViewProps> = ({
                 filteredStudents.map((s, idx) => {
                   const studentGrade = gradesMap[s.id] !== undefined ? gradesMap[s.id] : "";
                   const tier = getGradeTier(studentGrade);
-                  const autoDesc = getAutoTpDescription(studentGrade, selectedTp);
-                  const currentDesc = customDescMap[s.id] !== undefined ? customDescMap[s.id] : autoDesc;
+                  const autoDescs = getAutoTpDescriptions(studentGrade, selectedTp);
+                  const currentTinggi = customDescTinggiMap[s.id] !== undefined
+                    ? customDescTinggiMap[s.id]
+                    : (customDescMap[s.id] || autoDescs.tinggi);
+                  const currentBimbingan = customDescBimbinganMap[s.id] !== undefined
+                    ? customDescBimbinganMap[s.id]
+                    : autoDescs.perluBimbingan;
+                  const isCustomized = customDescTinggiMap[s.id] !== undefined || customDescBimbinganMap[s.id] !== undefined;
 
                   return (
                     <tr
@@ -825,32 +893,74 @@ export const InputPenilaianView: React.FC<InputPenilaianViewProps> = ({
                         />
                       </td>
 
-                      {/* Dynamic TP Achievement Description */}
+                      {/* Dynamic Dual TP Achievement Description (Capaian Tertinggi & Perlu Bimbingan) */}
                       <td className="p-3">
                         {tier ? (
-                          <div className="space-y-1.5">
-                            <div className="flex items-center space-x-2">
+                          <div className="space-y-2 py-1">
+                            {/* Tier Badge & Status */}
+                            <div className="flex items-center justify-between gap-2">
                               <span
-                                className={`inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold border ${tier.badgeClass}`}
+                                className={`inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold border ${tier.badgeClass}`}
                               >
                                 <span>{tier.icon}</span>
                                 <span>{tier.label}</span>
                               </span>
+
+                              {isCustomized && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleResetTpDescription(s.id)}
+                                  className="text-[10px] font-bold text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 cursor-pointer"
+                                  title="Kembalikan kedua kotak ke deskripsi otomatis Bank TP"
+                                >
+                                  <span>⚡ Reset ke TP Otomatis</span>
+                                </button>
+                              )}
                             </div>
 
-                            <input
-                              type="text"
-                              value={currentDesc}
-                              onChange={(e) =>
-                                setCustomDescMap((prev) => ({ ...prev, [s.id]: e.target.value }))
-                              }
-                              className="w-full text-[11px] p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                              placeholder="Deskripsi ketercapaian TP..."
-                            />
+                            {/* Dual Description Grid */}
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
+                              {/* Capaian Tertinggi */}
+                              <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-emerald-800 dark:text-emerald-300 flex items-center gap-1">
+                                  <span>🌟</span>
+                                  <span>Capaian Tertinggi:</span>
+                                </label>
+                                <textarea
+                                  rows={2}
+                                  value={currentTinggi}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setCustomDescTinggiMap((prev) => ({ ...prev, [s.id]: val }));
+                                    setCustomDescMap((prev) => ({ ...prev, [s.id]: val }));
+                                  }}
+                                  placeholder="Menunjukkan penguasaan sangat baik dalam..."
+                                  className="w-full text-[11px] p-2 rounded-lg border border-emerald-200 dark:border-emerald-800/60 bg-emerald-50/20 dark:bg-emerald-950/20 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500 leading-relaxed resize-y"
+                                />
+                              </div>
+
+                              {/* Perlu Peningkatan / Bimbingan */}
+                              <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-amber-800 dark:text-amber-300 flex items-center gap-1">
+                                  <span>🎯</span>
+                                  <span>Perlu Peningkatan / Bimbingan:</span>
+                                </label>
+                                <textarea
+                                  rows={2}
+                                  value={currentBimbingan}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setCustomDescBimbinganMap((prev) => ({ ...prev, [s.id]: val }));
+                                  }}
+                                  placeholder="Perlu peningkatan konsistensi pemahaman dan pendampingan dalam..."
+                                  className="w-full text-[11px] p-2 rounded-lg border border-amber-200 dark:border-amber-800/60 bg-amber-50/20 dark:bg-amber-950/20 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-amber-500 leading-relaxed resize-y"
+                                />
+                              </div>
+                            </div>
                           </div>
                         ) : (
                           <span className="text-[11px] text-slate-400 italic">
-                            Ketik nilai (0-100) untuk otomatis memunculkan deskripsi ketercapaian TP
+                            Ketik nilai (0-100) untuk otomatis memunculkan deskripsi Capaian Tertinggi dan Perlu Bimbingan dari Bank TP
                           </span>
                         )}
                       </td>

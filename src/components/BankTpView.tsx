@@ -1041,6 +1041,26 @@ export const BankTpView: React.FC<BankTpViewProps> = ({
         </div>
       </div>
 
+      {/* Simple Multi-TP Auto-Concatenation Info Banner */}
+      <div className="bg-gradient-to-r from-blue-500/10 via-indigo-500/10 to-emerald-500/10 border border-blue-200 dark:border-blue-800/80 rounded-2xl p-4 sm:p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 text-xs shadow-2xs">
+        <div className="flex items-start space-x-3">
+          <div className="p-2 rounded-xl bg-blue-600 text-white shadow-xs shrink-0 mt-0.5">
+            <Sparkles className="w-5 h-5" />
+          </div>
+          <div className="space-y-0.5">
+            <h4 className="font-extrabold text-sm text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+              <span>Konsep Baru: Simple Multi-TP Auto-Concatenation</span>
+              <span className="px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 text-[10px] font-bold">
+                Aktif
+              </span>
+            </h4>
+            <p className="text-slate-600 dark:text-slate-300 leading-relaxed max-w-3xl">
+              Guru cukup menginputkan 1, 2, atau beberapa TP yang diajarkan pada mapel & kelas ini (tanpa perlu repot menentukan kategori bobot). Seluruh TP akan dirangkai secara otomatis menjadi satu kalimat deskripsi utuh dan alami di lembar rapor sesuai capaian Standar Ketuntasan (KKTP) siswa.
+            </p>
+          </div>
+        </div>
+      </div>
+
       {/* Filter and Action Bar */}
       <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 sm:p-5 shadow-sm border border-slate-200 dark:border-slate-700/80 flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4">
         {/* Search */}
@@ -1488,26 +1508,14 @@ export const BankTpView: React.FC<BankTpViewProps> = ({
                 />
               </div>
 
-              {/* Kategori Capaian */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                  Kategori Capaian Target
-                </label>
-                <div className="grid grid-cols-4 gap-2">
-                  {(["Tinggi", "Sedang", "Bimbingan", "Umum"] as const).map((kat) => (
-                    <button
-                      key={kat}
-                      type="button"
-                      onClick={() => setFormData({ ...formData, kategori: kat })}
-                      className={`py-1.5 px-2 rounded-xl text-xs font-bold border transition ${
-                        formData.kategori === kat
-                          ? "bg-blue-600 text-white border-blue-600 shadow-sm"
-                          : "bg-slate-50 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100"
-                      }`}
-                    >
-                      {kat}
-                    </button>
-                  ))}
+              {/* Penyederhanaan Bank TP: Multi-TP Auto-Concatenation */}
+              <div className="p-3.5 rounded-xl bg-blue-50/80 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 text-xs text-blue-950 dark:text-blue-200 flex items-start space-x-2.5">
+                <Sparkles className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
+                <div className="leading-relaxed">
+                  <strong className="font-bold block text-blue-900 dark:text-blue-100 mb-0.5">
+                    💡 Simple Multi-TP (Tanpa Kategori)
+                  </strong>
+                  Guru tidak perlu mengelompokkan kategori bobot. Cukup masukkan TP yang diajarkan, sistem secara otomatis menggabungkannya secara alami menggunakan konjungsi Bahasa Indonesia ke lembar rapor siswa sesuai Standar Ketuntasan (KKTP).
                 </div>
               </div>
 
