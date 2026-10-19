@@ -1535,13 +1535,13 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
       namaGuruWali: (() => {
         const matchedWali = userList.find(
           (u) => u.role === "guru_kelas" && u.kelasUtama && u.kelasUtama.toLowerCase().trim() === siswa.kelas.toLowerCase().trim()
-        );
-        return matchedWali?.nama || matchedWali?.name || config.Nama_Guru || "Wali Kelas";
+        ) || userList.find((u) => u.role === "guru_kelas" || u.role === "admin");
+        return matchedWali?.nama || matchedWali?.name || config.Nama_Guru || currentUser?.nama || "Wali Kelas";
       })(),
       nipGuruWali: (() => {
         const matchedWali = userList.find(
           (u) => u.role === "guru_kelas" && u.kelasUtama && u.kelasUtama.toLowerCase().trim() === siswa.kelas.toLowerCase().trim()
-        );
+        ) || userList.find((u) => u.role === "guru_kelas" || u.role === "admin");
         return matchedWali?.nip || config.NIP_Guru || "-";
       })(),
       namaKepsek: config.Nama_Kepsek || "SUBUR, S.Pd.SD.",
@@ -1583,11 +1583,13 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
 
     saveTimeoutRef.current[primaryId] = setTimeout(async () => {
       try {
-        await saveDocument(COLLECTIONS.RAPORT_RECORDS, primaryId, withTimestamp as any);
-        await saveDocument(COLLECTIONS.RAPORT_RECORDS, altId1, withTimestamp as any);
-        await saveDocument(COLLECTIONS.BUKU_INDUK, primaryId, withTimestamp as any);
-        await saveDocument(COLLECTIONS.BUKU_INDUK, altId1, withTimestamp as any);
-        await saveDocument(COLLECTIONS.BUKU_INDUK, altId2, withTimestamp as any);
+        await batchSaveToMultipleCollections([
+          { collectionName: COLLECTIONS.RAPORT_RECORDS, id: primaryId, data: withTimestamp },
+          { collectionName: COLLECTIONS.RAPORT_RECORDS, id: altId1, data: withTimestamp },
+          { collectionName: COLLECTIONS.BUKU_INDUK, id: primaryId, data: withTimestamp },
+          { collectionName: COLLECTIONS.BUKU_INDUK, id: altId1, data: withTimestamp },
+          { collectionName: COLLECTIONS.BUKU_INDUK, id: altId2, data: withTimestamp },
+        ]);
         setLastAutoSaveTime(Date.now());
       } catch (e) {
         console.warn("Auto-save raport error:", e);
@@ -2440,7 +2442,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
       <div className="bg-gradient-to-r from-blue-700 via-indigo-700 to-sky-700 text-white p-6 rounded-2xl shadow-lg print:hidden">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="space-y-1.5">
-            <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-transparent/15 text-blue-100 text-xs font-semibold backdrop-blur-md">
+            <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-white/15 text-blue-100 text-xs font-semibold backdrop-blur-md">
               <GraduationCap className="w-4 h-4 text-amber-300" />
               <span>Modul Cetak Raport & Asesmen Terpadu</span>
             </div>
@@ -2455,7 +2457,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
           <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={handleDownloadTemplate}
-              className="inline-flex items-center space-x-2 px-3.5 py-2 rounded-xl bg-transparent/20 hover:bg-transparent/30 text-white text-xs font-bold transition shadow-sm backdrop-blur-md active:scale-95 cursor-pointer"
+              className="inline-flex items-center space-x-2 px-3.5 py-2 rounded-xl bg-white/20 hover:bg-white/30 text-white text-xs font-bold transition shadow-sm backdrop-blur-md active:scale-95 cursor-pointer"
             >
               <Download className="w-4 h-4 text-amber-300" />
               <span>Download Template Excel</span>
@@ -2485,8 +2487,8 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
             onClick={() => setActiveSubTab("cetak")}
             className={`inline-flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold transition ${
               activeSubTab === "cetak"
-                ? "bg-transparent text-blue-800 shadow-md"
-                : "bg-transparent/10 text-white hover:bg-transparent/20"
+                ? "bg-white text-blue-800 shadow-md"
+                : "bg-white/10 text-white hover:bg-white/20"
             }`}
           >
             <Eye className="w-4 h-4" />
@@ -2497,8 +2499,8 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
             onClick={() => setActiveSubTab("input")}
             className={`inline-flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold transition ${
               activeSubTab === "input"
-                ? "bg-transparent text-blue-800 shadow-md"
-                : "bg-transparent/10 text-white hover:bg-transparent/20"
+                ? "bg-white text-blue-800 shadow-md"
+                : "bg-white/10 text-white hover:bg-white/20"
             }`}
           >
             <Edit3 className="w-4 h-4" />
@@ -2509,8 +2511,8 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
             onClick={() => setActiveSubTab("leger")}
             className={`inline-flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold transition ${
               activeSubTab === "leger"
-                ? "bg-transparent text-blue-800 shadow-md"
-                : "bg-transparent/10 text-white hover:bg-transparent/20"
+                ? "bg-white text-blue-800 shadow-md"
+                : "bg-white/10 text-white hover:bg-white/20"
             }`}
           >
             <FileSpreadsheet className="w-4 h-4" />
@@ -2521,8 +2523,8 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
             onClick={() => setActiveSubTab("import")}
             className={`inline-flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold transition ${
               activeSubTab === "import"
-                ? "bg-transparent text-blue-800 shadow-md"
-                : "bg-transparent/10 text-white hover:bg-transparent/20"
+                ? "bg-white text-blue-800 shadow-md"
+                : "bg-white/10 text-white hover:bg-white/20"
             }`}
           >
             <Upload className="w-4 h-4" />
@@ -2532,7 +2534,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
       </div>
 
       {/* Main Filter Toolbar - Hidden when printing */}
-      <div className="bg-transparent dark:bg-slate-800 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-slate-700 space-y-4 print:hidden">
+      <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-slate-700 space-y-4 print:hidden">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {/* Periode Raport */}
           <div>
@@ -2662,7 +2664,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
             </span>
             <div className="text-xs font-black text-blue-950 dark:text-blue-100 mt-0.5 truncate flex items-center space-x-1.5">
               <span>{tempatTitimangsa || config.Tempat_Tanda_Tangan || "Kab. Bogor"},</span>
-              <span className="bg-transparent dark:bg-slate-800 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded shadow-2xs font-extrabold">
+              <span className="bg-white dark:bg-slate-800 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded shadow-2xs font-extrabold">
                 {formatTanggalIndonesia(tanggalRaport)}
               </span>
             </div>
@@ -2671,7 +2673,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
       </div>
 
       {/* Panel Pemilihan Mata Pelajaran dengan Checkbox & Integrasi Tambah Mapel / Kelola TP */}
-      <div className="bg-transparent dark:bg-slate-800 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-slate-700 space-y-3 print:hidden">
+      <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-slate-700 space-y-3 print:hidden">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-700/60">
           <div>
             <div className="flex items-center space-x-2">
@@ -2895,7 +2897,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
       {activeSubTab === "cetak" && (
         <div className="space-y-6">
           {/* Action Toolbar */}
-          <div className="bg-transparent dark:bg-slate-800 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col xl:flex-row xl:items-center justify-between gap-4 print:hidden">
+          <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col xl:flex-row xl:items-center justify-between gap-4 print:hidden">
             <div className="flex flex-wrap items-center gap-3">
               <div className="flex flex-wrap items-center gap-1.5">
                 <span className="text-xs font-bold text-slate-500 dark:text-slate-400 mr-1">Opsi Cetak:</span>
@@ -3012,7 +3014,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
 
           {/* Render Raport Paper(s) */}
           {classStudents.length === 0 ? (
-            <div className="p-12 text-center bg-transparent dark:bg-slate-800 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700">
+            <div className="p-12 text-center bg-white dark:bg-slate-800 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700">
               <Users className="w-12 h-12 text-slate-300 mx-auto mb-3" />
               <p className="text-slate-600 dark:text-slate-400 font-semibold text-sm">
                 Belum ada siswa yang terdaftar di {selectedKelas}.
@@ -3031,7 +3033,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
                   <React.Fragment key={student.id}>
                     {/* LEMBAR 1: COVER RAPOR (1 Lembar Utuh Kertas F4) */}
                     {(printMode === "full" || printMode === "cover") && (
-                      <div className="raport-f4-page raport-f4-cover bg-transparent text-black p-6 sm:p-10 rounded-2xl shadow-xl border border-slate-300 mx-auto w-full max-w-[215mm] min-h-[330mm] box-border mb-10 print:mb-0 print:p-0 print:shadow-none print:border-none print:w-[195mm] print:max-w-[195mm] print:h-[314mm] print:max-h-[314mm] print:overflow-hidden print:rounded-none">
+                      <div className="raport-f4-page raport-f4-cover bg-white text-black p-6 sm:p-10 rounded-2xl shadow-xl border border-slate-300 mx-auto w-full max-w-[215mm] min-h-[330mm] box-border mb-10 print:mb-0 print:p-0 print:shadow-none print:border-none print:w-[195mm] print:max-w-[195mm] print:h-[314mm] print:max-h-[314mm] print:overflow-hidden print:rounded-none">
                         <div className="raport-f4-cover-box flex flex-col justify-between h-full border-4 border-double border-slate-900 p-6 sm:p-8 text-center box-border">
                           {/* Top School Header */}
                           <div className="space-y-1.5">
@@ -3060,7 +3062,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
                               <img 
                                 src={config.Logo_Kiri} 
                                 alt="Logo Sekolah" 
-                                className="w-24 h-24 object-contain bg-transparent p-1 rounded-lg shadow-2xs"
+                                className="w-24 h-24 object-contain bg-white p-1 rounded-lg shadow-2xs"
                               />
                             ) : (
                               <div className="w-24 h-24 rounded-full border-4 border-blue-900 flex items-center justify-center bg-blue-50 text-blue-900 shadow-inner">
@@ -3117,7 +3119,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
 
                     {/* LEMBAR 2: NILAI CAPAIAN HASIL BELAJAR (1 Lembar Utuh Kertas F4) */}
                     {(printMode === "full" || printMode === "lembar_nilai") && (
-                      <div className="raport-f4-page raport-f4-nilai bg-transparent text-black p-6 sm:p-8 rounded-2xl shadow-xl border border-slate-300 mx-auto w-full max-w-[215mm] min-h-[330mm] box-border mb-10 print:mb-0 print:p-0 print:shadow-none print:border-none print:w-[195mm] print:max-w-[195mm] print:h-[314mm] print:max-h-[314mm] print:overflow-hidden print:rounded-none">
+                      <div className="raport-f4-page raport-f4-nilai bg-white text-black p-6 sm:p-8 rounded-2xl shadow-xl border border-slate-300 mx-auto w-full max-w-[215mm] min-h-[330mm] box-border mb-10 print:mb-0 print:p-0 print:shadow-none print:border-none print:w-[195mm] print:max-w-[195mm] print:h-[314mm] print:max-h-[314mm] print:overflow-hidden print:rounded-none">
                         <div className="raport-f4-nilai-box flex flex-col justify-between h-full space-y-3 print:space-y-1.5 box-border">
                           {/* Kop Surat Resmi */}
                           {showKopSekolah && (
@@ -3325,7 +3327,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
       {/* SUB-TAB 2: INPUT & EDIT NILAI RAPORT */}
       {/* ========================================================================= */}
       {activeSubTab === "input" && (
-        <div className="bg-transparent dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-700 space-y-6">
+        <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-700 space-y-6">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100 flex items-center space-x-2">
@@ -3348,7 +3350,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
                   }}
                   className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 cursor-pointer ${
                     inputViewMode === "table"
-                      ? "bg-transparent dark:bg-slate-800 text-blue-700 dark:text-blue-300 shadow-2xs"
+                      ? "bg-white dark:bg-slate-800 text-blue-700 dark:text-blue-300 shadow-2xs"
                       : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
                   }`}
                 >
@@ -3363,7 +3365,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
                   }}
                   className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 cursor-pointer ${
                     inputViewMode === "accordion"
-                      ? "bg-transparent dark:bg-slate-800 text-blue-700 dark:text-blue-300 shadow-2xs"
+                      ? "bg-white dark:bg-slate-800 text-blue-700 dark:text-blue-300 shadow-2xs"
                       : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
                   }`}
                 >
@@ -3439,7 +3441,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
                   <select
                     value={selectedTableMapelFilter}
                     onChange={(e) => setSelectedTableMapelFilter(e.target.value)}
-                    className="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-transparent dark:bg-slate-900 font-bold text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-600 cursor-pointer shadow-2xs"
+                    className="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 font-bold text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-600 cursor-pointer shadow-2xs"
                   >
                     <option value="Semua">✨ Tampilkan Semua Mapel ({displayMapelNames.length})</option>
                     {displayMapelNames.map((mName, idx) => (
@@ -3454,7 +3456,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
                 </div>
               </div>
 
-              <div className="overflow-auto max-h-[75vh] border border-black rounded-xl shadow-xs bg-transparent dark:bg-slate-900 relative">
+              <div className="overflow-auto max-h-[75vh] border border-black rounded-xl shadow-xs bg-white dark:bg-slate-900 relative">
                 <table className="w-full text-left text-xs border-collapse border border-black text-slate-900 dark:text-slate-100 font-sans relative">
                   <thead>
                     {/* Row 1: Header Titles */}
@@ -3524,7 +3526,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
                           </td>
 
                           {/* NAMA SISWA (Sticky Column) */}
-                          <td className="p-2.5 border border-black align-top bg-transparent dark:bg-slate-900 sticky left-[40px] z-10 w-48 min-w-[190px] border-r-2 border-black shadow-md">
+                          <td className="p-2.5 border border-black align-top bg-white dark:bg-slate-900 sticky left-[40px] z-10 w-48 min-w-[190px] border-r-2 border-black shadow-md">
                             <strong className="block text-xs font-bold text-slate-900 dark:text-slate-100 uppercase leading-snug">
                               {s.nama}
                             </strong>
@@ -3547,7 +3549,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
                             const currentTps = effectiveTpBank[mName] || DEFAULT_TP_TEMPLATES[mName] || [];
 
                             return (
-                              <td key={mName} className="p-2 border border-black align-top space-y-2 bg-transparent dark:bg-slate-900 min-w-[240px]">
+                              <td key={mName} className="p-2 border border-black align-top space-y-2 bg-white dark:bg-slate-900 min-w-[240px]">
                                 {/* Score Input Box */}
                                 <div className="flex items-center justify-center space-x-1 pb-1 border-b border-slate-200 dark:border-slate-800">
                                   <span className="text-[10px] font-bold text-slate-500">Nilai:</span>
@@ -3704,7 +3706,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
                           })}
 
                           {/* ABSENSI CELLS (S, I, A) */}
-                          <td className="p-1.5 border border-black align-top text-center bg-transparent dark:bg-slate-900 min-w-[54px] w-14">
+                          <td className="p-1.5 border border-black align-top text-center bg-white dark:bg-slate-900 min-w-[54px] w-14">
                             <input
                               type="number"
                               min="0"
@@ -3719,11 +3721,11 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
                                   }
                                 });
                               }}
-                              className="w-11 h-8 text-center text-xs font-black px-1 py-1 rounded border border-slate-400 dark:border-slate-600 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none focus:outline-none focus:ring-1 focus:ring-blue-600 focus:bg-transparent"
+                              className="w-11 h-8 text-center text-xs font-black px-1 py-1 rounded border border-slate-400 dark:border-slate-600 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none focus:outline-none focus:ring-1 focus:ring-blue-600 focus:bg-white"
                               title="Jumlah Sakit"
                             />
                           </td>
-                          <td className="p-1.5 border border-black align-top text-center bg-transparent dark:bg-slate-900 min-w-[54px] w-14">
+                          <td className="p-1.5 border border-black align-top text-center bg-white dark:bg-slate-900 min-w-[54px] w-14">
                             <input
                               type="number"
                               min="0"
@@ -3738,11 +3740,11 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
                                   }
                                 });
                               }}
-                              className="w-11 h-8 text-center text-xs font-black px-1 py-1 rounded border border-slate-400 dark:border-slate-600 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none focus:outline-none focus:ring-1 focus:ring-blue-600 focus:bg-transparent"
+                              className="w-11 h-8 text-center text-xs font-black px-1 py-1 rounded border border-slate-400 dark:border-slate-600 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none focus:outline-none focus:ring-1 focus:ring-blue-600 focus:bg-white"
                               title="Jumlah Izin"
                             />
                           </td>
-                          <td className="p-1.5 border border-black align-top text-center bg-transparent dark:bg-slate-900 min-w-[54px] w-14">
+                          <td className="p-1.5 border border-black align-top text-center bg-white dark:bg-slate-900 min-w-[54px] w-14">
                             <input
                               type="number"
                               min="0"
@@ -3757,13 +3759,13 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
                                   }
                                 });
                               }}
-                              className="w-11 h-8 text-center text-xs font-black px-1 py-1 rounded border border-slate-400 dark:border-slate-600 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none focus:outline-none focus:ring-1 focus:ring-blue-600 focus:bg-transparent"
+                              className="w-11 h-8 text-center text-xs font-black px-1 py-1 rounded border border-slate-400 dark:border-slate-600 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none focus:outline-none focus:ring-1 focus:ring-blue-600 focus:bg-white"
                               title="Jumlah Alpa"
                             />
                           </td>
 
                         {/* CATATAN WALI KELAS & EKSKUL */}
-                        <td className="p-2 border border-black align-top space-y-2 bg-transparent dark:bg-slate-900 min-w-[250px]">
+                        <td className="p-2 border border-black align-top space-y-2 bg-white dark:bg-slate-900 min-w-[250px]">
                           {/* Catatan Wali Kelas */}
                           <div>
                             <span className="block text-[10px] font-bold text-slate-900 dark:text-slate-100 mb-0.5">
@@ -3825,7 +3827,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
                                           updated[ekIdx] = { ...ek, nama: e.target.value };
                                           handleUpdateRaportRecord({ ...studentRaport, ekskul: updated });
                                         }}
-                                        className="w-full font-bold px-1 py-0.5 rounded border border-slate-300 dark:border-slate-600 bg-transparent dark:bg-slate-900"
+                                        className="w-full font-bold px-1 py-0.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900"
                                         placeholder="Nama Ekskul"
                                       />
                                       <select
@@ -3835,7 +3837,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
                                           updated[ekIdx] = { ...ek, predikat: e.target.value };
                                           handleUpdateRaportRecord({ ...studentRaport, ekskul: updated });
                                         }}
-                                        className="font-black px-1 py-0.5 rounded border border-slate-300 dark:border-slate-600 bg-transparent dark:bg-slate-900 text-purple-800"
+                                        className="font-black px-1 py-0.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-purple-800"
                                       >
                                         <option value="A">A</option>
                                         <option value="B">B</option>
@@ -3862,7 +3864,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
                                         updated[ekIdx] = { ...ek, keterangan: e.target.value };
                                         handleUpdateRaportRecord({ ...studentRaport, ekskul: updated });
                                       }}
-                                      className="w-full text-[9px] px-1 py-0.5 rounded border border-slate-300 dark:border-slate-600 bg-transparent dark:bg-slate-900"
+                                      className="w-full text-[9px] px-1 py-0.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900"
                                       placeholder="Keterangan ekskul..."
                                     />
                                   </div>
@@ -3935,7 +3937,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
                               key={nm.mapel} 
                               className={`p-3.5 rounded-xl border shadow-xs space-y-3 transition ${
                                 isMapelActive 
-                                  ? "bg-transparent dark:bg-slate-800 border-slate-200 dark:border-slate-700" 
+                                  ? "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700" 
                                   : "bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700/60 opacity-80"
                               }`}
                             >
@@ -4177,7 +4179,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
 
                     {/* Attendance & Catatan Row */}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
-                      <div className="bg-transparent dark:bg-slate-800 p-3 rounded-lg border border-slate-200 dark:border-slate-700 space-y-2">
+                      <div className="bg-white dark:bg-slate-800 p-3 rounded-lg border border-slate-200 dark:border-slate-700 space-y-2">
                         <label className="block text-xs font-bold text-slate-700 dark:text-slate-200">
                           Rekap Absensi (Hari)
                         </label>
@@ -4239,7 +4241,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
                         </div>
                       </div>
 
-                      <div className="md:col-span-2 bg-transparent dark:bg-slate-800 p-3 rounded-lg border border-slate-200 dark:border-slate-700 space-y-1.5">
+                      <div className="md:col-span-2 bg-white dark:bg-slate-800 p-3 rounded-lg border border-slate-200 dark:border-slate-700 space-y-1.5">
                         <label className="block text-xs font-bold text-slate-700 dark:text-slate-200">
                           Catatan Wali Kelas
                         </label>
@@ -4259,7 +4261,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
                     </div>
 
                     {/* Kegiatan Ekstrakurikuler Editor Section */}
-                    <div className="bg-transparent dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700 space-y-3">
+                    <div className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700 space-y-3">
                       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-700/60 pb-2">
                         <div className="flex items-center space-x-2">
                           <Award className="w-4 h-4 text-purple-600 dark:text-purple-400" />
@@ -4361,7 +4363,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
                                       ekskul: updatedEkskul
                                     });
                                   }}
-                                  className="w-full text-xs font-bold px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-transparent dark:bg-slate-800 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                  className="w-full text-xs font-bold px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-purple-500"
                                   placeholder="Nama Ekskul (contoh: Pramuka)"
                                 />
                                 <datalist id={`ekskul-options-${s.id}-${ekIdx}`}>
@@ -4393,7 +4395,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
                                       ekskul: updatedEkskul
                                     });
                                   }}
-                                  className="w-full text-xs font-black px-2 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-transparent dark:bg-slate-800 text-purple-700 dark:text-purple-300 focus:outline-none focus:ring-2 focus:ring-purple-500 text-center"
+                                  className="w-full text-xs font-black px-2 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-purple-700 dark:text-purple-300 focus:outline-none focus:ring-2 focus:ring-purple-500 text-center"
                                 >
                                   <option value="A">A (Sangat Baik)</option>
                                   <option value="B">B (Baik)</option>
@@ -4418,7 +4420,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
                                       ekskul: updatedEkskul
                                     });
                                   }}
-                                  className="w-full text-xs px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-transparent dark:bg-slate-800 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                  className="w-full text-xs px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-purple-500"
                                   placeholder="Deskripsi keaktifan dan pencapaian siswa..."
                                 />
                               </div>
@@ -4458,7 +4460,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
       {/* SUB-TAB 3: LEGER & REKAP NILAI KELAS */}
       {/* ========================================================================= */}
       {activeSubTab === "leger" && (
-        <div className="bg-transparent dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-700 space-y-6">
+        <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-700 space-y-6">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100 flex items-center space-x-2">
@@ -4540,7 +4542,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
       {/* SUB-TAB 4: IMPORT EXCEL & PANDUAN */}
       {/* ========================================================================= */}
       {activeSubTab === "import" && (
-        <div className="bg-transparent dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-700 space-y-6">
+        <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-700 space-y-6">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100 flex items-center space-x-2">
@@ -4623,7 +4625,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
       {/* ========================================================================= */}
       {isImportModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-transparent dark:bg-slate-800 rounded-2xl max-w-4xl w-full max-h-[90vh] flex flex-col shadow-2xl border border-slate-200 dark:border-slate-700 animate-in fade-in zoom-in duration-200">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-4xl w-full max-h-[90vh] flex flex-col shadow-2xl border border-slate-200 dark:border-slate-700 animate-in fade-in zoom-in duration-200">
             {/* Modal Header */}
             <div className="p-5 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
               <div>
@@ -4724,7 +4726,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
       {/* ========================================================================= */}
       {isAddMapelModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-transparent dark:bg-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-700 space-y-5 animate-in fade-in zoom-in duration-200">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-700 space-y-5 animate-in fade-in zoom-in duration-200">
             <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-700">
               <div className="flex items-center space-x-2">
                 <div className="w-8 h-8 rounded-lg bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold">
@@ -4850,7 +4852,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
       {/* ========================================================================= */}
       {isTpModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5">
-          <div className="bg-transparent dark:bg-slate-800 rounded-2xl max-w-4xl w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-200 dark:border-slate-700 animate-in fade-in zoom-in duration-200 overflow-hidden">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-4xl w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-200 dark:border-slate-700 animate-in fade-in zoom-in duration-200 overflow-hidden">
             {/* Modal Header */}
             <div className="p-5 border-b border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-gradient-to-r from-blue-50/60 via-indigo-50/40 to-slate-50/40 dark:from-slate-800 dark:to-slate-900">
               <div className="flex items-center space-x-3">
@@ -4892,7 +4894,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
                     setAiPreviewTinggi("");
                     setAiPreviewBimbingan("");
                   }}
-                  className="text-xs font-bold px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-transparent dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-blue-500 focus:outline-none cursor-pointer"
+                  className="text-xs font-bold px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-blue-500 focus:outline-none cursor-pointer"
                 >
                   {displayMapelNames.length > 0 ? (
                     displayMapelNames.map((m) => (
@@ -4939,7 +4941,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
                       value={newTpText}
                       onChange={(e) => setNewTpText(e.target.value)}
                       placeholder={`Tuliskan rumusan TP untuk ${activeTpMapel}...`}
-                      className="flex-1 text-xs p-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-transparent dark:bg-slate-800 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
+                      className="flex-1 text-xs p-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
                     />
                     <button
                       type="button"
@@ -4965,7 +4967,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
                     currentMapelTps.map((tp, idx) => (
                       <div
                         key={idx}
-                        className="p-3 bg-transparent dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl flex items-start justify-between gap-3 shadow-2xs group hover:border-blue-300 transition"
+                        className="p-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl flex items-start justify-between gap-3 shadow-2xs group hover:border-blue-300 transition"
                       >
                         <div className="flex items-start space-x-2.5">
                           <span className="w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300 flex items-center justify-center font-bold text-[11px] shrink-0 mt-0.5">
@@ -5011,7 +5013,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
                         setAiPreviewTinggi("");
                         setAiPreviewBimbingan("");
                       }}
-                      className="w-full text-xs font-bold px-3 py-2 rounded-lg border border-indigo-300 dark:border-indigo-700 bg-transparent dark:bg-slate-800 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      className="w-full text-xs font-bold px-3 py-2 rounded-lg border border-indigo-300 dark:border-indigo-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                     >
                       <option value="all">⚡ Seluruh Siswa Sekelas ({classStudents.length} Siswa)</option>
                       {classStudents.map((s) => {
@@ -5059,7 +5061,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
                           value={aiPreviewTinggi}
                           onChange={(e) => setAiPreviewTinggi(e.target.value)}
                           placeholder="Klik 'Generate AI' di atas untuk merumuskan kalimat capaian tertinggi..."
-                          className="w-full text-xs p-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-transparent dark:bg-slate-800 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none leading-relaxed"
+                          className="w-full text-xs p-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none leading-relaxed"
                         />
                       </div>
 
@@ -5072,7 +5074,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
                           value={aiPreviewBimbingan}
                           onChange={(e) => setAiPreviewBimbingan(e.target.value)}
                           placeholder="Klik 'Generate AI' di atas untuk merumuskan aspek yang perlu bimbingan..."
-                          className="w-full text-xs p-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-transparent dark:bg-slate-800 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none leading-relaxed"
+                          className="w-full text-xs p-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none leading-relaxed"
                         />
                       </div>
 
@@ -5120,7 +5122,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
       {/* ========================================================================= */}
       {tpPickerState.isOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-          <div className="bg-transparent dark:bg-slate-800 rounded-2xl max-w-2xl w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-700 space-y-4 max-h-[90vh] flex flex-col animate-scale-in">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl max-w-2xl w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-700 space-y-4 max-h-[90vh] flex flex-col animate-scale-in">
             {/* Modal Header */}
             <div className="flex items-start justify-between pb-3 border-b border-slate-200 dark:border-slate-700">
               <div className="flex items-center space-x-3">
@@ -5222,7 +5224,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
                 className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition cursor-pointer ${
                   tpPickerState.targetField === "tinggi"
                     ? "bg-emerald-600 text-white shadow-xs"
-                    : "text-slate-600 dark:text-slate-400 hover:bg-transparent/50"
+                    : "text-slate-600 dark:text-slate-400 hover:bg-white/50"
                 }`}
               >
                 ✓ Terapkan ke Capaian Tertinggi
@@ -5233,7 +5235,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
                 className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition cursor-pointer ${
                   tpPickerState.targetField === "bimbingan"
                     ? "bg-amber-600 text-white shadow-xs"
-                    : "text-slate-600 dark:text-slate-400 hover:bg-transparent/50"
+                    : "text-slate-600 dark:text-slate-400 hover:bg-white/50"
                 }`}
               >
                 ⚠️ Terapkan ke Perlu Bimbingan

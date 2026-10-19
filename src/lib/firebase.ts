@@ -11,8 +11,7 @@ import {
   onSnapshot, 
   getDocs,
   writeBatch,
-  persistentLocalCache,
-  persistentMultipleTabManager
+  memoryLocalCache
 } from "firebase/firestore";
 import firebaseConfigData from "../../firebase-applet-config.json";
 import { 
@@ -59,9 +58,7 @@ export const firestore = (() => {
       app, 
       {
         experimentalForceLongPolling: true,
-        localCache: persistentLocalCache({
-          tabManager: persistentMultipleTabManager()
-        })
+        localCache: memoryLocalCache()
       }, 
       dbId
     );
@@ -487,8 +484,38 @@ export async function deleteDocument(collectionName: string, id: string) {
   }
 }
 
+// Batch Save Documents to Multiple Collections with local cache mirror (if applicable)
+export async function batchSaveToMultipleCollections(
+  operations: Array<{ collectionName: string; id: string; data: Record<string, any> }>
+) {
+  if (!operations || operations.length === 0) return;
+
+  try {
+    const CHUNK_SIZE = 400;
+    for (let i = 0; i < operations.length; i += CHUNK_SIZE) {
+      const chunk = operations.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(firestore);
+      chunk.forEach((op) => {
+        const docRef = doc(firestore, op.collectionName, op.id);
+        const cleanData = sanitizeData({ ...op.data, updatedAt: Date.now() });
+        batch.set(docRef, cleanData, { merge: true });
+      });
+      await batch.commit();
+      recordServerWrite(chunk.length);
+    }
+  } catch (err: any) {
+    const errMsg = err?.message || String(err);
+    if (errMsg.toLowerCase().includes("quota") || err?.code === "resource-exhausted") {
+      notifyQuotaExceeded();
+    }
+    console.error(`Error batch saving documents to multiple collections:`, err);
+    throw err;
+  }
+}
+
 // Batch Save Documents with local cache mirror
 export async function batchSaveDocuments(collectionName: string, items: Array<{ id: string; [key: string]: any }>) {
+
   if (!items || items.length === 0) return;
   const cacheKey = `edadmin_cache_${collectionName}`;
 
