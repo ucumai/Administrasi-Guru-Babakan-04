@@ -1535,13 +1535,13 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
       namaGuruWali: (() => {
         const matchedWali = userList.find(
           (u) => u.role === "guru_kelas" && u.kelasUtama && u.kelasUtama.toLowerCase().trim() === siswa.kelas.toLowerCase().trim()
-        ) || userList.find((u) => u.role === "guru_kelas" || u.role === "admin");
-        return matchedWali?.nama || matchedWali?.name || config.Nama_Guru || currentUser?.nama || "Wali Kelas";
+        );
+        return matchedWali?.nama || matchedWali?.name || config.Nama_Guru || "Wali Kelas";
       })(),
       nipGuruWali: (() => {
         const matchedWali = userList.find(
           (u) => u.role === "guru_kelas" && u.kelasUtama && u.kelasUtama.toLowerCase().trim() === siswa.kelas.toLowerCase().trim()
-        ) || userList.find((u) => u.role === "guru_kelas" || u.role === "admin");
+        );
         return matchedWali?.nip || config.NIP_Guru || "-";
       })(),
       namaKepsek: config.Nama_Kepsek || "SUBUR, S.Pd.SD.",
@@ -2388,7 +2388,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
             doc.text(`${tempatTtd}, ${tglFormatted}`, 175, ttdY, { align: "center" });
             doc.text("Guru Kelas / Wali Kelas,", 175, ttdY + 3.8, { align: "center" });
             doc.setFont("helvetica", "bold");
-            doc.text(studentRaport.namaGuruWali || currentUser?.nama || "Eri Iriana Rifai, S.Kom.", 175, ttdY + 15, { align: "center" });
+            doc.text(studentRaport.namaGuruWali || "Wali Kelas", 175, ttdY + 15, { align: "center" });
             doc.setFont("helvetica", "normal");
             doc.setFontSize(7);
             doc.text(`NIP. ${studentRaport.nipGuruWali || "-"}`, 175, ttdY + 18.5, { align: "center" });
@@ -2401,7 +2401,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
             doc.text(`${tempatTtd}, ${tglFormatted}`, 165, ttdY, { align: "center" });
             doc.text("Guru Kelas / Wali Kelas,", 165, ttdY + 3.8, { align: "center" });
             doc.setFont("helvetica", "bold");
-            doc.text(studentRaport.namaGuruWali || currentUser?.nama || "Eri Iriana Rifai, S.Kom.", 165, ttdY + 15, { align: "center" });
+            doc.text(studentRaport.namaGuruWali || "Wali Kelas", 165, ttdY + 15, { align: "center" });
             doc.setFont("helvetica", "normal");
             doc.setFontSize(7);
             doc.text(`NIP. ${studentRaport.nipGuruWali || "-"}`, 165, ttdY + 18.5, { align: "center" });
@@ -3307,7 +3307,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
                                 <p className="font-semibold">Guru Kelas / Wali Kelas</p>
                               </div>
                               <div>
-                                <p className="font-bold underline">{studentRaport.namaGuruWali || currentUser?.nama || "Eri Iriana Rifai, S.Kom."}</p>
+                                <p className="font-bold underline">{studentRaport.namaGuruWali || "Wali Kelas"}</p>
                                 <p className="text-[9px]">NIP. {studentRaport.nipGuruWali || "-"}</p>
                               </div>
                             </div>
