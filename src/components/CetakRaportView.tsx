@@ -429,8 +429,9 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
   // Debounced auto-save timer ref
   const saveTimeoutRef = useRef<{ [docId: string]: NodeJS.Timeout }>({});
 
-  // Subscribe to real-time RAPORT_RECORDS collection from Firestore
+  // Subscribe to real-time RAPORT_RECORDS collection from Firestore with Scoped Query per class & TTL
   useEffect(() => {
+    const scopeOptions = selectedKelas ? { scopeField: "kelas", scopeValue: selectedKelas, customTtl: 30 } : undefined;
     const unsub = subscribeCollection<RaportRecord>(COLLECTIONS.RAPORT_RECORDS, (data) => {
       if (data && data.length > 0) {
         setRaportRecords((prev) => {
@@ -454,10 +455,10 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
           return prev;
         });
       }
-    });
+    }, scopeOptions);
 
     return () => unsub();
-  }, []);
+  }, [selectedKelas]);
 
   // Also import existing Raport records from bukuIndukList if present
   useEffect(() => {
@@ -1617,6 +1618,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
     try {
       const recordsToSave: RaportRecord[] = classStudents.map((s) => getRaportForStudent(s));
 
+      const batchOperations: Array<{ collectionName: string; id: string; data: Record<string, any> }> = [];
       for (const rec of recordsToSave) {
         const cleanTahun = (rec.tahunAjaran || selectedTahunAjaran).replace(/\//g, "-");
         const fullDocId = `raport_${rec.idSiswa}_${cleanTahun}_${rec.periode || selectedPeriode}`;
@@ -1625,12 +1627,14 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
 
         const recWithTs = { ...rec, id: fullDocId, updatedAt: Date.now() };
 
-        await saveDocument(COLLECTIONS.RAPORT_RECORDS, fullDocId, recWithTs as any);
-        await saveDocument(COLLECTIONS.RAPORT_RECORDS, altDocId, recWithTs as any);
-        await saveDocument(COLLECTIONS.BUKU_INDUK, fullDocId, recWithTs as any);
-        await saveDocument(COLLECTIONS.BUKU_INDUK, altDocId, recWithTs as any);
-        await saveDocument(COLLECTIONS.BUKU_INDUK, legacyDocId, recWithTs as any);
+        batchOperations.push({ collectionName: COLLECTIONS.RAPORT_RECORDS, id: fullDocId, data: recWithTs as any });
+        batchOperations.push({ collectionName: COLLECTIONS.RAPORT_RECORDS, id: altDocId, data: recWithTs as any });
+        batchOperations.push({ collectionName: COLLECTIONS.BUKU_INDUK, id: fullDocId, data: recWithTs as any });
+        batchOperations.push({ collectionName: COLLECTIONS.BUKU_INDUK, id: altDocId, data: recWithTs as any });
+        batchOperations.push({ collectionName: COLLECTIONS.BUKU_INDUK, id: legacyDocId, data: recWithTs as any });
       }
+
+      await batchSaveToMultipleCollections(batchOperations);
 
       // Update local storage and in-memory map under all aliases
       const updatedMap = { ...raportRecords };

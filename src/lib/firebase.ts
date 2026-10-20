@@ -10,6 +10,10 @@ import {
   deleteDoc, 
   onSnapshot, 
   getDocs,
+  getDoc,
+  query,
+  where,
+  limit,
   writeBatch,
   memoryLocalCache
 } from "firebase/firestore";
@@ -81,7 +85,9 @@ import {
   setQuotaExceededStateInStats,
   onRefreshRequest,
   onSyncModeChange,
-  DEFAULT_TTL_MINUTES
+  DEFAULT_TTL_MINUTES,
+  isUserCurrentlyIdle,
+  onIdleStateChange
 } from "./firestoreOptimizer";
 
 // Quota exhaustion listener to inform UI and users gracefully
@@ -184,7 +190,8 @@ export const COLLECTIONS = {
   P5_PENILAIAN: "p5_penilaian",
   P5_PORTOFOLIO: "p5_portofolio",
   BANK_TP: "bank_tp",
-  RAPORT_RECORDS: "raport_records"
+  RAPORT_RECORDS: "raport_records",
+  AGGREGATED_SUMMARIES: "aggregated_summaries"
 };
 
 type CollectionListener<T = any> = (data: T[]) => void;
@@ -203,16 +210,32 @@ export function broadcastCollectionData<T = any>(collectionName: string, data: T
   }
 }
 
-// Generic Realtime Subscription with instant cache hydration, SWR with TTL, and anti-limit optimization
-export function subscribeCollection<T>(collectionName: string, callback: (data: T[]) => void) {
-  const cacheKey = `edadmin_cache_${collectionName}`;
+export interface SubscribeOptions {
+  scopeField?: string;
+  scopeValue?: any;
+  limitCount?: number;
+  customTtl?: number;
+}
+
+// Generic Realtime Subscription with instant cache hydration, Scoped Query, SWR with TTL, and anti-limit optimization
+export function subscribeCollection<T>(
+  collectionName: string, 
+  callback: (data: T[]) => void,
+  options?: SubscribeOptions
+) {
+  const isScoped = Boolean(options?.scopeField && options?.scopeValue !== undefined && options?.scopeValue !== "" && options?.scopeValue !== null);
+  const scopeKey = isScoped ? `${options!.scopeField}_${options!.scopeValue}` : undefined;
+  const cacheKey = isScoped 
+    ? `edadmin_cache_${collectionName}_${options!.scopeField}_${options!.scopeValue}`
+    : `edadmin_cache_${collectionName}`;
+  const listenerKey = isScoped ? `${collectionName}_${options!.scopeField}_${options!.scopeValue}` : collectionName;
   let isUnsubscribed = false;
   let activeUnsubscribe: (() => void) | null = null;
 
-  if (!activeCollectionListeners.has(collectionName)) {
-    activeCollectionListeners.set(collectionName, new Set());
+  if (!activeCollectionListeners.has(listenerKey)) {
+    activeCollectionListeners.set(listenerKey, new Set());
   }
-  activeCollectionListeners.get(collectionName)!.add(callback as CollectionListener);
+  activeCollectionListeners.get(listenerKey)!.add(callback as CollectionListener);
 
   // 1. Immediately emit cached data if available (instant offline/quota-proof display in 0ms)
   let cachedData: T[] | null = null;
@@ -231,6 +254,21 @@ export function subscribeCollection<T>(collectionName: string, callback: (data: 
     console.warn(`Error reading local cache for ${collectionName}:`, err);
   }
 
+  // Build target query (Scoped Query or Full Collection)
+  const buildTargetQuery = () => {
+    const colRef = collection(firestore, collectionName);
+    if (isScoped) {
+      if (options?.limitCount) {
+        return query(colRef, where(options.scopeField!, "==", options.scopeValue), limit(options.limitCount));
+      }
+      return query(colRef, where(options.scopeField!, "==", options.scopeValue));
+    }
+    if (options?.limitCount) {
+      return query(colRef, limit(options.limitCount));
+    }
+    return colRef;
+  };
+
   // Helper to attach Firestore listener
   const attachListener = () => {
     if (isUnsubscribed) return;
@@ -239,9 +277,9 @@ export function subscribeCollection<T>(collectionName: string, callback: (data: 
       activeUnsubscribe = null;
     }
 
-    const colRef = collection(firestore, collectionName);
+    const targetQuery = buildTargetQuery();
     activeUnsubscribe = onSnapshot(
-      colRef, 
+      targetQuery as any, 
       (snapshot) => {
         const items: T[] = [];
         snapshot.forEach((docSnap) => {
@@ -251,7 +289,7 @@ export function subscribeCollection<T>(collectionName: string, callback: (data: 
         // 2. Persist fresh server data into local cache & record sync
         try {
           localStorage.setItem(cacheKey, JSON.stringify(items));
-          markCollectionFresh(collectionName);
+          markCollectionFresh(collectionName, scopeKey);
           recordLastSyncTime();
         } catch (err) {
           console.warn(`Error updating local cache for ${collectionName}:`, err);
@@ -289,14 +327,14 @@ export function subscribeCollection<T>(collectionName: string, callback: (data: 
   // Helper to fetch once via getDocs (used when manual refresh is clicked in Zero-Cost mode)
   const fetchOnce = async () => {
     try {
-      const colRef = collection(firestore, collectionName);
-      const snapshot = await getDocs(colRef);
+      const targetQuery = buildTargetQuery();
+      const snapshot = await getDocs(targetQuery as any);
       const items: T[] = [];
       snapshot.forEach((docSnap) => {
-        items.push({ id: docSnap.id, ...docSnap.data() } as unknown as T);
+        items.push({ id: docSnap.id, ...(docSnap.data() as Record<string, any>) } as unknown as T);
       });
       localStorage.setItem(cacheKey, JSON.stringify(items));
-      markCollectionFresh(collectionName);
+      markCollectionFresh(collectionName, scopeKey);
       recordLastSyncTime();
       callback(items);
     } catch (err: any) {
@@ -307,7 +345,7 @@ export function subscribeCollection<T>(collectionName: string, callback: (data: 
     }
   };
 
-  // 2. Decide connection policy based on sync mode
+  // 2. Decide connection policy based on sync mode & scoped TTL
   const syncMode = getSyncMode();
   const isCoreCollection = collectionName === COLLECTIONS.USERS || collectionName === COLLECTIONS.PENGATURAN;
 
@@ -318,11 +356,10 @@ export function subscribeCollection<T>(collectionName: string, callback: (data: 
     }
   } else if (syncMode === "auto") {
     // Mode Otomatis Anti-Limit (Recommended):
-    // Core collections (Users, Pengaturan) have continuous listener
     if (isCoreCollection) {
       attachListener();
     } else {
-      const isFresh = isCollectionFresh(collectionName, DEFAULT_TTL_MINUTES);
+      const isFresh = isCollectionFresh(collectionName, options?.customTtl, scopeKey);
       if (isFresh && cachedData && cachedData.length > 0) {
         // Cache is fresh within TTL! Skip network request, record saved quota
         recordCacheHit(cachedData.length);
@@ -340,27 +377,45 @@ export function subscribeCollection<T>(collectionName: string, callback: (data: 
   const handleVisibilityChange = () => {
     if (isUnsubscribed) return;
     if (document.hidden) {
-      // Tab went into background/minimized -> detach listener to save reads
+      // Tab went into background/minimized -> detach listener immediately to save reads
       if (!isCoreCollection && activeUnsubscribe) {
         try { activeUnsubscribe(); } catch {}
         activeUnsubscribe = null;
       }
     } else {
-      // Tab returned to focus -> re-attach if not fresh or if in realtime mode
-      if (!isCoreCollection && !activeUnsubscribe) {
+      // Tab returned to focus -> re-attach if not fresh or if in realtime mode and user is not idle
+      if (!isCoreCollection && !activeUnsubscribe && !isUserCurrentlyIdle()) {
         const mode = getSyncMode();
-        if (mode === "realtime" || (mode === "auto" && !isCollectionFresh(collectionName, DEFAULT_TTL_MINUTES))) {
+        if (mode === "realtime" || (mode === "auto" && !isCollectionFresh(collectionName, options?.customTtl, scopeKey))) {
           attachListener();
         }
       }
     }
   };
 
+  // 4. User Inactivity / Idle optimization: Disconnect when user leaves device for 10 minutes
+  const unsubIdle = onIdleStateChange((isIdle) => {
+    if (isUnsubscribed) return;
+    if (isIdle) {
+      if (!isCoreCollection && activeUnsubscribe) {
+        try { activeUnsubscribe(); } catch {}
+        activeUnsubscribe = null;
+      }
+    } else {
+      if (!isCoreCollection && !activeUnsubscribe && typeof document !== "undefined" && !document.hidden) {
+        const mode = getSyncMode();
+        if (mode === "realtime" || (mode === "auto" && !isCollectionFresh(collectionName, options?.customTtl, scopeKey))) {
+          attachListener();
+        }
+      }
+    }
+  });
+
   if (typeof document !== "undefined") {
     document.addEventListener("visibilitychange", handleVisibilityChange);
   }
 
-  // 4. Handle manual force refresh request
+  // 5. Handle manual force refresh request
   const unsubRefresh = onRefreshRequest((targetCollection) => {
     if (!targetCollection || targetCollection === collectionName) {
       if (getSyncMode() === "zero_cost") {
@@ -371,7 +426,7 @@ export function subscribeCollection<T>(collectionName: string, callback: (data: 
     }
   });
 
-  // 5. Handle sync mode change live
+  // 6. Handle sync mode change live
   const unsubMode = onSyncModeChange((newMode) => {
     if (newMode === "zero_cost") {
       if (!isCoreCollection && activeUnsubscribe) {
@@ -383,7 +438,7 @@ export function subscribeCollection<T>(collectionName: string, callback: (data: 
         attachListener();
       }
     } else if (newMode === "auto") {
-      if (!isCoreCollection && isCollectionFresh(collectionName, DEFAULT_TTL_MINUTES)) {
+      if (!isCoreCollection && isCollectionFresh(collectionName, options?.customTtl, scopeKey)) {
         if (activeUnsubscribe) {
           try { activeUnsubscribe(); } catch {}
           activeUnsubscribe = null;
@@ -396,10 +451,11 @@ export function subscribeCollection<T>(collectionName: string, callback: (data: 
 
   return () => {
     isUnsubscribed = true;
-    activeCollectionListeners.get(collectionName)?.delete(callback as CollectionListener);
+    activeCollectionListeners.get(listenerKey)?.delete(callback as CollectionListener);
     if (typeof document !== "undefined") {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     }
+    unsubIdle();
     unsubRefresh();
     unsubMode();
     if (activeUnsubscribe) {
@@ -407,6 +463,64 @@ export function subscribeCollection<T>(collectionName: string, callback: (data: 
       activeUnsubscribe = null;
     }
   };
+}
+
+// Aggregation / Bucketing helper to save summary documents
+export async function saveAggregatedSummary(summaryCollection: string, summaryId: string, data: Record<string, any>) {
+  try {
+    const docRef = doc(firestore, summaryCollection, summaryId);
+    await setDoc(docRef, sanitizeData({ ...data, updatedAt: Date.now() }), { merge: true });
+    recordServerWrite(1);
+  } catch (e) {
+    console.warn(`Error saving aggregated summary ${summaryCollection}/${summaryId}:`, e);
+  }
+}
+
+// Aggregation / Bucketing helper to get summary documents with local caching
+export async function getAggregatedSummary(summaryCollection: string, summaryId: string): Promise<Record<string, any> | null> {
+  const cacheKey = `edadmin_summary_${summaryCollection}_${summaryId}`;
+  try {
+    const cached = localStorage.getItem(cacheKey);
+    if (cached) {
+      return JSON.parse(cached);
+    }
+  } catch {}
+
+  try {
+    const docRef = doc(firestore, summaryCollection, summaryId);
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      const data = snap.data();
+      localStorage.setItem(cacheKey, JSON.stringify(data));
+      return data;
+    }
+  } catch (e) {
+    console.warn(`Error fetching aggregated summary ${summaryCollection}/${summaryId}:`, e);
+  }
+  return null;
+}
+
+// Daily Attendance Bucketing: Saves single summary bucket per day and per class
+export async function saveDailyAttendanceBucket(
+  tanggal: string, 
+  kelas: string, 
+  summary: { totalSiswa: number; hadir: number; sakit: number; izin: number; alpa: number; persentaseHadir: number }
+) {
+  const bucketId = `attendance_${tanggal}_${kelas || 'semua'}`;
+  await saveAggregatedSummary(COLLECTIONS.AGGREGATED_SUMMARIES, bucketId, {
+    tanggal,
+    kelas,
+    ...summary
+  });
+}
+
+// Daily Attendance Bucketing: Retrieves cached or Firestore summary bucket
+export async function getDailyAttendanceBucket(
+  tanggal: string, 
+  kelas: string
+): Promise<{ totalSiswa: number; hadir: number; sakit: number; izin: number; alpa: number; persentaseHadir: number } | null> {
+  const bucketId = `attendance_${tanggal}_${kelas || 'semua'}`;
+  return (await getAggregatedSummary(COLLECTIONS.AGGREGATED_SUMMARIES, bucketId)) as any;
 }
 
 // Helper to clean undefined properties before sending to Firestore

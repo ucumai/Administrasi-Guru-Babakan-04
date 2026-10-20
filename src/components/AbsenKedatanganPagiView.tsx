@@ -49,7 +49,14 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
 import { Siswa, LogKedatangan, LogAbsensi, User, Pengaturan } from "../types";
-import { saveDocument, deleteDocument, batchSaveDocuments, COLLECTIONS } from "../lib/firebase";
+import { 
+  saveDocument, 
+  deleteDocument, 
+  batchSaveDocuments, 
+  batchSaveToMultipleCollections, 
+  saveDailyAttendanceBucket,
+  COLLECTIONS 
+} from "../lib/firebase";
 import { 
   getLocalDateStr, 
   getLocalTimeStr, 
@@ -1002,10 +1009,44 @@ export const AbsenKedatanganPagiView: React.FC<AbsenKedatanganPagiViewProps> = (
     notifySimpanSuccess(`Berhasil mencatat Hadir untuk ${unrecorded.length} siswa & disinkronkan ke Absen Kelas!`);
 
     try {
-      await batchSaveDocuments(COLLECTIONS.PRESENSI_KEDATANGAN, payloads);
-      for (const s of unrecorded) {
-        await syncToClassAbsensi(s, selectedTanggal, "Hadir");
-      }
+      const [thn, bln] = (selectedTanggal || getLocalDateStr()).split("-");
+      const multiOps: Array<{ collectionName: string; id: string; data: Record<string, any> }> = [];
+
+      payloads.forEach((p) => {
+        multiOps.push({ collectionName: COLLECTIONS.PRESENSI_KEDATANGAN, id: p.id, data: p });
+      });
+
+      unrecorded.forEach((s) => {
+        const classDocId = `${selectedTanggal}_${s.kelas}_Semua Mapel (Guru Kelas)_${s.id}`;
+        const absensiPayload: LogAbsensi = {
+          id: classDocId,
+          waktu: selectedTanggal,
+          tanggal: selectedTanggal,
+          kelas: s.kelas,
+          mapel: "Semua Mapel (Guru Kelas)",
+          idSiswa: s.id,
+          namaSiswa: s.nama,
+          status: "Hadir",
+          bulan: bln || "01",
+          tahun: thn || "2026",
+          namaGuru: currentUser?.nama || config?.Nama_Guru || "Piket Kedatangan Pagi"
+        };
+        multiOps.push({ collectionName: COLLECTIONS.LOG_ABSENSI, id: classDocId, data: absensiPayload });
+      });
+
+      await batchSaveToMultipleCollections(multiOps);
+
+      // Save daily aggregated bucket for 0-read dashboard statistics
+      const totalSiswa = siswaList.length;
+      const hadirCount = todayLogs.filter(l => l.statusKehadiran === 'Hadir' || l.status === 'Tepat Waktu' || l.status === 'Sangat Pagi' || l.status === 'Terlambat').length + unrecorded.length;
+      await saveDailyAttendanceBucket(selectedTanggal, selectedKelasFilter || "semua", {
+        totalSiswa,
+        hadir: hadirCount,
+        sakit: todayLogs.filter(l => l.statusKehadiran === 'Sakit' || l.status === 'Sakit').length,
+        izin: todayLogs.filter(l => l.statusKehadiran === 'Izin' || l.status === 'Izin').length,
+        alpa: todayLogs.filter(l => l.statusKehadiran === 'Alpa' || l.status === 'Alpa').length,
+        persentaseHadir: Math.round((hadirCount / Math.max(1, totalSiswa)) * 100)
+      });
     } catch (err: any) {
       notifySimpanError(err.message || "Gagal melakukan presensi massal.");
     }
@@ -1058,10 +1099,44 @@ export const AbsenKedatanganPagiView: React.FC<AbsenKedatanganPagiViewProps> = (
     notifySimpanSuccess(`Berhasil menandai ${unrecorded.length} siswa sebagai Alpa & disinkronkan ke Absen Kelas!`);
 
     try {
-      await batchSaveDocuments(COLLECTIONS.PRESENSI_KEDATANGAN, payloads);
-      for (const s of unrecorded) {
-        await syncToClassAbsensi(s, selectedTanggal, "Alpa");
-      }
+      const [thn, bln] = (selectedTanggal || getLocalDateStr()).split("-");
+      const multiOps: Array<{ collectionName: string; id: string; data: Record<string, any> }> = [];
+
+      payloads.forEach((p) => {
+        multiOps.push({ collectionName: COLLECTIONS.PRESENSI_KEDATANGAN, id: p.id, data: p });
+      });
+
+      unrecorded.forEach((s) => {
+        const classDocId = `${selectedTanggal}_${s.kelas}_Semua Mapel (Guru Kelas)_${s.id}`;
+        const absensiPayload: LogAbsensi = {
+          id: classDocId,
+          waktu: selectedTanggal,
+          tanggal: selectedTanggal,
+          kelas: s.kelas,
+          mapel: "Semua Mapel (Guru Kelas)",
+          idSiswa: s.id,
+          namaSiswa: s.nama,
+          status: "Alpa",
+          bulan: bln || "01",
+          tahun: thn || "2026",
+          namaGuru: currentUser?.nama || config?.Nama_Guru || "Piket Kedatangan Pagi"
+        };
+        multiOps.push({ collectionName: COLLECTIONS.LOG_ABSENSI, id: classDocId, data: absensiPayload });
+      });
+
+      await batchSaveToMultipleCollections(multiOps);
+
+      // Save daily aggregated bucket for 0-read dashboard statistics
+      const totalSiswa = siswaList.length;
+      const alpaCount = todayLogs.filter(l => l.statusKehadiran === 'Alpa' || l.status === 'Alpa').length + unrecorded.length;
+      await saveDailyAttendanceBucket(selectedTanggal, selectedKelasFilter || "semua", {
+        totalSiswa,
+        hadir: todayLogs.filter(l => l.statusKehadiran === 'Hadir' || l.status === 'Tepat Waktu' || l.status === 'Sangat Pagi' || l.status === 'Terlambat').length,
+        sakit: todayLogs.filter(l => l.statusKehadiran === 'Sakit' || l.status === 'Sakit').length,
+        izin: todayLogs.filter(l => l.statusKehadiran === 'Izin' || l.status === 'Izin').length,
+        alpa: alpaCount,
+        persentaseHadir: Math.round((todayLogs.filter(l => l.statusKehadiran === 'Hadir' || l.status === 'Tepat Waktu' || l.status === 'Sangat Pagi' || l.status === 'Terlambat').length / Math.max(1, totalSiswa)) * 100)
+      });
     } catch (err: any) {
       notifySimpanError(err.message || "Gagal menandai Alpa.");
     }
@@ -1318,13 +1393,32 @@ export const AbsenKedatanganPagiView: React.FC<AbsenKedatanganPagiViewProps> = (
           return;
         }
 
-        await batchSaveDocuments(COLLECTIONS.PRESENSI_KEDATANGAN, payloads);
-        for (const p of payloads) {
+        const [thn, bln] = targetDate.split("-");
+        const multiOps: Array<{ collectionName: string; id: string; data: Record<string, any> }> = [];
+
+        payloads.forEach((p) => {
+          multiOps.push({ collectionName: COLLECTIONS.PRESENSI_KEDATANGAN, id: p.id, data: p });
           const s = siswaList.find((st) => st.id === p.idSiswa);
           if (s) {
-            await syncToClassAbsensi(s, targetDate, "Hadir");
+            const classDocId = `${targetDate}_${s.kelas}_Semua Mapel (Guru Kelas)_${s.id}`;
+            const absensiPayload: LogAbsensi = {
+              id: classDocId,
+              waktu: targetDate,
+              tanggal: targetDate,
+              kelas: s.kelas,
+              mapel: "Semua Mapel (Guru Kelas)",
+              idSiswa: s.id,
+              namaSiswa: s.nama,
+              status: "Hadir",
+              bulan: bln || "01",
+              tahun: thn || "2026",
+              namaGuru: currentUser?.nama || config?.Nama_Guru || "Piket Kedatangan Pagi"
+            };
+            multiOps.push({ collectionName: COLLECTIONS.LOG_ABSENSI, id: classDocId, data: absensiPayload });
           }
-        }
+        });
+
+        await batchSaveToMultipleCollections(multiOps);
 
         notifySimpanSuccess(`Berhasil mengimpor & mengintegrasikan ${payloads.length} data rekap kehadiran pagi!`);
       } catch (err: any) {

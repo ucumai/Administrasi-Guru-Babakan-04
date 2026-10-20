@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { ClipboardCheck, Camera, CheckCircle2, Save, UserCheck, AlertCircle, RefreshCw, Sunrise } from "lucide-react";
 import jsQR from "jsqr";
 import { Siswa, Mapel, LogAbsensi, Pengaturan, User, LogKedatangan } from "../types";
-import { saveDocument, batchSaveDocuments, COLLECTIONS } from "../lib/firebase";
+import { saveDocument, batchSaveDocuments, saveDailyAttendanceBucket, COLLECTIONS } from "../lib/firebase";
 import { getAllowedClasses } from "../lib/accessControl";
 import { notifySimpanSuccess, notifySimpanError } from "../lib/swal";
 import { getLocalDateStr, onDayRollover, formatTanggalLengkap } from "../lib/dateUtils";
@@ -189,6 +189,18 @@ export const InputAbsensiView: React.FC<InputAbsensiViewProps> = ({
 
     try {
       await batchSaveDocuments(COLLECTIONS.LOG_ABSENSI, itemsToSave);
+      const hadirCount = itemsToSave.filter(i => i.status === 'Hadir').length;
+      const sakitCount = itemsToSave.filter(i => i.status === 'Sakit').length;
+      const izinCount = itemsToSave.filter(i => i.status === 'Izin').length;
+      const alpaCount = itemsToSave.filter(i => i.status === 'Alpa').length;
+      await saveDailyAttendanceBucket(tanggal, selectedKelas, {
+        totalSiswa: itemsToSave.length,
+        hadir: hadirCount,
+        sakit: sakitCount,
+        izin: izinCount,
+        alpa: alpaCount,
+        persentaseHadir: Math.round((hadirCount / Math.max(1, itemsToSave.length)) * 100)
+      });
       notifySimpanSuccess(`Absensi kelas ${selectedKelas} (${itemsToSave.length} siswa) tersimpan ke Firebase!`);
     } catch (err: any) {
       notifySimpanError(err.message || "Gagal menyimpan absensi.");

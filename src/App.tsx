@@ -203,9 +203,9 @@ export default function App() {
     return () => clearTimeout(timer);
   }, []);
 
-  // Subscribe to Firebase real-time collections
+  // 1. Core Essential Data Subscriptions (Always needed, lightweight & heavily cached)
   useEffect(() => {
-    let unsubs: Array<() => void> = [];
+    const unsubs: Array<() => void> = [];
 
     unsubs.push(subscribeCollection<User>(COLLECTIONS.USERS, (data) => {
       setUserList(data);
@@ -225,65 +225,6 @@ export default function App() {
       setJadwalList(data);
     }));
 
-    unsubs.push(subscribeCollection<LogAbsensi>(COLLECTIONS.LOG_ABSENSI, (data) => {
-      setAbsensiList(data);
-    }));
-
-    unsubs.push(subscribeCollection<DataNilai>(COLLECTIONS.DATA_NILAI, (data) => {
-      setNilaiList(data);
-    }));
-
-    unsubs.push(subscribeCollection<JurnalAgenda>(COLLECTIONS.JURNAL_AGENDA, (data) => {
-      setAgendaList(data);
-    }));
-
-    unsubs.push(subscribeCollection<SiswaBimbingan>(COLLECTIONS.SISWA_BIMBINGAN, (data) => {
-      setSiswaBimbinganList(data);
-    }));
-
-    unsubs.push(subscribeCollection<BimbinganWali>(COLLECTIONS.BIMBINGAN_WALI, (data) => {
-      setBimbinganList(data);
-    }));
-
-    unsubs.push(subscribeCollection<TabunganKelas>(COLLECTIONS.TABUNGAN_KELAS, (data) => {
-      setTabunganList(data);
-    }));
-
-    unsubs.push(subscribeCollection<AsetKelas>(COLLECTIONS.ASET_KELAS, (data) => {
-      setAsetList(data);
-    }));
-
-    unsubs.push(subscribeCollection<PeminjamanAset>(COLLECTIONS.PEMINJAMAN_ASET, (data) => {
-      setPeminjamanList(data);
-    }));
-
-    unsubs.push(subscribeCollection<BhpKelas>(COLLECTIONS.BHP_KELAS, (data) => {
-      setBhpList(data);
-    }));
-
-    unsubs.push(subscribeCollection<PemakaianBhp>(COLLECTIONS.PEMAKAIAN_BHP, (data) => {
-      setPemakaianBhpList(data);
-    }));
-
-    unsubs.push(subscribeCollection<BukuIndukSiswa>(COLLECTIONS.BUKU_INDUK, (data) => {
-      setBukuIndukList(data);
-    }));
-
-    unsubs.push(subscribeCollection<LogKedatangan>(COLLECTIONS.PRESENSI_KEDATANGAN, (data) => {
-      setLogKedatanganList(data);
-    }));
-
-    unsubs.push(subscribeCollection<BankSoalPaket>(COLLECTIONS.BANK_SOAL, (data) => {
-      setBankSoalList(data);
-    }));
-
-    unsubs.push(subscribeCollection<BankTpItem>(COLLECTIONS.BANK_TP, (data) => {
-      setBankTpList(data);
-      try {
-        localStorage.setItem("edadmin_bank_tp_cache", JSON.stringify(data));
-      } catch {}
-    }));
-
     unsubs.push(subscribePengaturan((cfg) => {
       if (cfg && Object.keys(cfg).length > 0) {
         setConfig((prev) => ({ ...prev, ...cfg }));
@@ -294,6 +235,103 @@ export default function App() {
       unsubs.forEach((unsub) => unsub());
     };
   }, []);
+
+  // 2. On-Demand / Lazy-Loaded Subscriptions with Scoped Queries & Automatic Unsubscribing on tab switch
+  useEffect(() => {
+    const tabUnsubs: Array<() => void> = [];
+    const isGuru = currentUser?.role === "guru_kelas" && Boolean(currentUser?.kelasUtama);
+    const guruKelas = currentUser?.kelasUtama || "";
+
+    // Tab Penilaian, Raport, Buku Induk, Kuis Interaktif, Pusat Laporan
+    if (["penilaian", "raport", "buku_induk", "kuis_interaktif", "pusat_laporan"].includes(activeTab)) {
+      tabUnsubs.push(
+        subscribeCollection<DataNilai>(
+          COLLECTIONS.DATA_NILAI, 
+          setNilaiList, 
+          isGuru ? { scopeField: "kelas", scopeValue: guruKelas } : undefined
+        )
+      );
+      tabUnsubs.push(
+        subscribeCollection<BankTpItem>(COLLECTIONS.BANK_TP, (data) => {
+          setBankTpList(data);
+          try { localStorage.setItem("edadmin_bank_tp_cache", JSON.stringify(data)); } catch {}
+        })
+      );
+    }
+
+    // Tab Absensi & Kedatangan Pagi
+    if (["absen_kedatangan", "absensi", "pusat_laporan", "dashboard"].includes(activeTab)) {
+      tabUnsubs.push(
+        subscribeCollection<LogAbsensi>(
+          COLLECTIONS.LOG_ABSENSI, 
+          setAbsensiList,
+          isGuru ? { scopeField: "kelas", scopeValue: guruKelas } : undefined
+        )
+      );
+      tabUnsubs.push(
+        subscribeCollection<LogKedatangan>(
+          COLLECTIONS.PRESENSI_KEDATANGAN, 
+          setLogKedatanganList,
+          isGuru ? { scopeField: "kelas", scopeValue: guruKelas } : undefined
+        )
+      );
+    }
+
+    // Tab Buku Induk / Raport / Siswa
+    if (["buku_induk", "raport", "siswa"].includes(activeTab)) {
+      tabUnsubs.push(
+        subscribeCollection<BukuIndukSiswa>(
+          COLLECTIONS.BUKU_INDUK, 
+          setBukuIndukList,
+          isGuru ? { scopeField: "kelas", scopeValue: guruKelas } : undefined
+        )
+      );
+    }
+
+    // Tab Agenda Mengajar
+    if (activeTab === "agenda") {
+      tabUnsubs.push(subscribeCollection<JurnalAgenda>(COLLECTIONS.JURNAL_AGENDA, setAgendaList));
+    }
+
+    // Tab Bimbingan
+    if (activeTab === "bimbingan") {
+      tabUnsubs.push(subscribeCollection<SiswaBimbingan>(COLLECTIONS.SISWA_BIMBINGAN, setSiswaBimbinganList));
+      tabUnsubs.push(subscribeCollection<BimbinganWali>(COLLECTIONS.BIMBINGAN_WALI, setBimbinganList));
+    }
+
+    // Tab Tabungan Kelas
+    if (activeTab === "tabungan") {
+      tabUnsubs.push(
+        subscribeCollection<TabunganKelas>(
+          COLLECTIONS.TABUNGAN_KELAS, 
+          setTabunganList,
+          isGuru ? { scopeField: "kelas", scopeValue: guruKelas } : undefined
+        )
+      );
+    }
+
+    // Tab Aset Kelas
+    if (activeTab === "aset_kelas") {
+      tabUnsubs.push(subscribeCollection<AsetKelas>(COLLECTIONS.ASET_KELAS, setAsetList));
+      tabUnsubs.push(subscribeCollection<PeminjamanAset>(COLLECTIONS.PEMINJAMAN_ASET, setPeminjamanList));
+    }
+
+    // Tab Stok BHP
+    if (activeTab === "stok_bhp") {
+      tabUnsubs.push(subscribeCollection<BhpKelas>(COLLECTIONS.BHP_KELAS, setBhpList));
+      tabUnsubs.push(subscribeCollection<PemakaianBhp>(COLLECTIONS.PEMAKAIAN_BHP, setPemakaianBhpList));
+    }
+
+    // Tab Bank Soal & Kuis
+    if (["bank_soal", "kuis_interaktif"].includes(activeTab)) {
+      tabUnsubs.push(subscribeCollection<BankSoalPaket>(COLLECTIONS.BANK_SOAL, setBankSoalList));
+    }
+
+    // Cleanup: releases server listeners when user switches tabs to save Firestore read quota
+    return () => {
+      tabUnsubs.forEach((unsub) => unsub());
+    };
+  }, [activeTab, currentUser?.role, currentUser?.kelasUtama]);
 
   // Seed initial users if USERS collection is empty AND never seeded before
   useEffect(() => {

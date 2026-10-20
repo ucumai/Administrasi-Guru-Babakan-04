@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   Star,
   Save,
@@ -11,11 +11,12 @@ import {
   ArrowRight,
   TrendingUp,
   Award,
-  AlertTriangle
+  AlertTriangle,
+  Loader2
 } from "lucide-react";
 import Swal from "sweetalert2";
 import { Siswa, Mapel, DataNilai, Pengaturan, User, BankTpItem, RaportRecord } from "../types";
-import { batchSaveDocuments, saveDocument, COLLECTIONS } from "../lib/firebase";
+import { batchSaveDocuments, batchSaveToMultipleCollections, saveDocument, COLLECTIONS } from "../lib/firebase";
 import { getAllowedClasses } from "../lib/accessControl";
 import { notifySimpanSuccess, notifySimpanError } from "../lib/swal";
 import { DEFAULT_TP_TEMPLATES, cleanTpText, filterBankTpItems, generateDynamicTpDescription } from "../lib/tpUtils";
@@ -61,8 +62,16 @@ export const InputPenilaianView: React.FC<InputPenilaianViewProps> = ({
   });
   const [selectedTp, setSelectedTp] = useState<string>("");
   const [customTpMode, setCustomTpMode] = useState<boolean>(false);
-  const [searchStudent, setSearchStudent] = useState<string>("");
   const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [saveStatus, setSaveStatus] = useState<"saved" | "saving" | "unsaved">("saved");
+  const autoSaveDebounceRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Cleanup auto-save timer on unmount
+  useEffect(() => {
+    return () => {
+      if (autoSaveDebounceRef.current) clearTimeout(autoSaveDebounceRef.current);
+    };
+  }, []);
 
   // Map of student grades: { studentId: number | "" }
   const [gradesMap, setGradesMap] = useState<Record<string, number | "">>({});
@@ -70,6 +79,7 @@ export const InputPenilaianView: React.FC<InputPenilaianViewProps> = ({
   const [customDescTinggiMap, setCustomDescTinggiMap] = useState<Record<string, string>>({});
   const [customDescBimbinganMap, setCustomDescBimbinganMap] = useState<Record<string, string>>({});
   const [customDescMap, setCustomDescMap] = useState<Record<string, string>>({});
+  const [searchStudent, setSearchStudent] = useState<string>("");
 
   const allowedClasses = getAllowedClasses(currentUser, siswaList.map((s) => s.kelas));
   const isGuruKelas = currentUser?.role === "guru_kelas";
@@ -272,6 +282,13 @@ export const InputPenilaianView: React.FC<InputPenilaianViewProps> = ({
   const handleGradeChange = (studentId: string, value: string) => {
     const num = value === "" ? "" : Math.min(100, Math.max(0, Number(value)));
     setGradesMap((prev) => ({ ...prev, [studentId]: num }));
+
+    // Debounce mass batch save (2.5s) to cloud to minimize writes and prevent network quota congestion
+    if (autoSaveDebounceRef.current) clearTimeout(autoSaveDebounceRef.current);
+    setSaveStatus("unsaved");
+    autoSaveDebounceRef.current = setTimeout(() => {
+      handleSaveNilai(true);
+    }, 2500);
   };
 
   // Quick reset to auto-generated Bank TP description
@@ -299,6 +316,13 @@ export const InputPenilaianView: React.FC<InputPenilaianViewProps> = ({
       nextMap[s.id] = presetVal;
     });
     setGradesMap(nextMap);
+
+    // Debounce mass batch save
+    if (autoSaveDebounceRef.current) clearTimeout(autoSaveDebounceRef.current);
+    setSaveStatus("unsaved");
+    autoSaveDebounceRef.current = setTimeout(() => {
+      handleSaveNilai(true);
+    }, 2500);
   };
 
   const handleResetAllDescriptions = () => {
@@ -314,20 +338,21 @@ export const InputPenilaianView: React.FC<InputPenilaianViewProps> = ({
     });
   };
 
-  // Save Nilai & TP Achievement to Firebase
-  const handleSaveNilai = async () => {
+  // Save Nilai & TP Achievement to Firebase using Single-Commit Batch Operations
+  const handleSaveNilai = async (isAutoSave = false) => {
     const mapelToSave = selectedMapel || (isGuruKelas ? "Tematik / Guru Kelas" : "");
     if (!selectedKelas || (!isGuruKelas && !selectedMapel) || !jenisPenilaian) {
-      notifySimpanError("Silakan pilih Kelas, Mapel, dan Jenis Penilaian.");
+      if (!isAutoSave) notifySimpanError("Silakan pilih Kelas, Mapel, dan Jenis Penilaian.");
       return;
     }
 
     if (studentsInClass.length === 0) {
-      notifySimpanError("Belum ada siswa di kelas ini.");
+      if (!isAutoSave) notifySimpanError("Belum ada siswa di kelas ini.");
       return;
     }
 
     setIsSaving(true);
+    setSaveStatus("saving");
     const todayStr = new Date().toISOString().split("T")[0];
     const itemsToSave: DataNilai[] = studentsInClass.map((s) => {
       const docId = `${selectedKelas}_${mapelToSave}_${jenisPenilaian}_${s.id}`;
@@ -355,9 +380,10 @@ export const InputPenilaianView: React.FC<InputPenilaianViewProps> = ({
     });
 
     try {
+      // 1. Batch save all grades in single atomic commit
       await batchSaveDocuments(COLLECTIONS.DATA_NILAI, itemsToSave);
 
-      // Automatic Raport Syncing upon saving grades
+      // 2. Automatic Raport Syncing grouped into single multi-collection batch commit
       try {
         let savedCached: Record<string, RaportRecord> = {};
         try {
@@ -368,6 +394,8 @@ export const InputPenilaianView: React.FC<InputPenilaianViewProps> = ({
         const tahunAjaran = config.Tahun_Ajaran || "2024/2025";
         const periode = config.Semester === "Genap" ? "Semester 2 (Genap)" : "Semester 1 (Ganjil)";
         const cleanTahun = tahunAjaran.replace(/\//g, "-");
+
+        const raportBatchOps: Array<{ collectionName: string; id: string; data: Record<string, any> }> = [];
 
         for (const s of studentsInClass) {
           const gradeVal = gradesMap[s.id];
@@ -440,23 +468,34 @@ export const InputPenilaianView: React.FC<InputPenilaianViewProps> = ({
             savedCached[altDocId] = updatedRec;
             savedCached[legacyId] = updatedRec;
 
-            saveDocument(COLLECTIONS.RAPORT_RECORDS, docId, updatedRec as any);
-            saveDocument(COLLECTIONS.RAPORT_RECORDS, altDocId, updatedRec as any);
-            saveDocument(COLLECTIONS.BUKU_INDUK, docId, updatedRec as any);
-            saveDocument(COLLECTIONS.BUKU_INDUK, altDocId, updatedRec as any);
-            saveDocument(COLLECTIONS.BUKU_INDUK, legacyId, updatedRec as any);
+            raportBatchOps.push({ collectionName: COLLECTIONS.RAPORT_RECORDS, id: docId, data: updatedRec });
+            raportBatchOps.push({ collectionName: COLLECTIONS.RAPORT_RECORDS, id: altDocId, data: updatedRec });
+            raportBatchOps.push({ collectionName: COLLECTIONS.BUKU_INDUK, id: docId, data: updatedRec });
+            raportBatchOps.push({ collectionName: COLLECTIONS.BUKU_INDUK, id: altDocId, data: updatedRec });
+            raportBatchOps.push({ collectionName: COLLECTIONS.BUKU_INDUK, id: legacyId, data: updatedRec });
           }
         }
         localStorage.setItem("edadmin_persisted_raport_records", JSON.stringify(savedCached));
+
+        // Execute all Raport updates in single batch
+        if (raportBatchOps.length > 0) {
+          await batchSaveToMultipleCollections(raportBatchOps);
+        }
       } catch (e) {
-        console.warn("Auto-sync to Raport error:", e);
+        console.warn("Auto-sync to Raport batch error:", e);
       }
 
-      notifySimpanSuccess(
-        `Nilai ${jenisPenilaian} kelas ${selectedKelas} (${mapelToSave}) beserta deskripsi TP berhasil disimpan & otomatis disinkronkan ke Raport!`
-      );
+      setSaveStatus("saved");
+      if (!isAutoSave) {
+        notifySimpanSuccess(
+          `Nilai ${jenisPenilaian} kelas ${selectedKelas} (${mapelToSave}) beserta deskripsi TP berhasil disimpan & otomatis disinkronkan ke Raport!`
+        );
+      }
     } catch (err: any) {
-      notifySimpanError(err.message || "Gagal menyimpan nilai.");
+      setSaveStatus("unsaved");
+      if (!isAutoSave) {
+        notifySimpanError(err.message || "Gagal menyimpan nilai.");
+      }
     } finally {
       setIsSaving(false);
     }
@@ -493,6 +532,7 @@ export const InputPenilaianView: React.FC<InputPenilaianViewProps> = ({
       const periode = config.Semester === "Genap" ? "Semester 2 (Genap)" : "Semester 1 (Ganjil)";
 
       let syncedCount = 0;
+      const syncBatchOps: Array<{ collectionName: string; id: string; data: Record<string, any> }> = [];
       for (const s of studentsInClass) {
         const gradeVal = gradesMap[s.id];
         if (typeof gradeVal === "number") {
@@ -565,13 +605,17 @@ export const InputPenilaianView: React.FC<InputPenilaianViewProps> = ({
           savedCached[altDocId] = updatedRec;
           savedCached[legacyId] = updatedRec;
 
-          await saveDocument(COLLECTIONS.RAPORT_RECORDS, docId, updatedRec as any);
-          await saveDocument(COLLECTIONS.RAPORT_RECORDS, altDocId, updatedRec as any);
-          await saveDocument(COLLECTIONS.BUKU_INDUK, docId, updatedRec as any);
-          await saveDocument(COLLECTIONS.BUKU_INDUK, altDocId, updatedRec as any);
-          await saveDocument(COLLECTIONS.BUKU_INDUK, legacyId, updatedRec as any);
+          syncBatchOps.push({ collectionName: COLLECTIONS.RAPORT_RECORDS, id: docId, data: updatedRec });
+          syncBatchOps.push({ collectionName: COLLECTIONS.RAPORT_RECORDS, id: altDocId, data: updatedRec });
+          syncBatchOps.push({ collectionName: COLLECTIONS.BUKU_INDUK, id: docId, data: updatedRec });
+          syncBatchOps.push({ collectionName: COLLECTIONS.BUKU_INDUK, id: altDocId, data: updatedRec });
+          syncBatchOps.push({ collectionName: COLLECTIONS.BUKU_INDUK, id: legacyId, data: updatedRec });
           syncedCount++;
         }
+      }
+
+      if (syncBatchOps.length > 0) {
+        await batchSaveToMultipleCollections(syncBatchOps);
       }
 
       try {
@@ -994,7 +1038,7 @@ export const InputPenilaianView: React.FC<InputPenilaianViewProps> = ({
           <div className="flex items-center gap-2.5">
             <button
               type="button"
-              onClick={handleSaveNilai}
+              onClick={() => handleSaveNilai(false)}
               disabled={studentsInClass.length === 0 || isSaving}
               className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-6 py-2.5 rounded-xl text-xs font-bold flex items-center space-x-2 shadow-md cursor-pointer transition active:scale-95"
             >
