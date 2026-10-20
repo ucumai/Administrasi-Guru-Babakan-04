@@ -17,7 +17,7 @@ import {
 import Swal from "sweetalert2";
 import { Siswa, Mapel, DataNilai, Pengaturan, User, BankTpItem, RaportRecord } from "../types";
 import { batchSaveDocuments, batchSaveToMultipleCollections, saveDocument, COLLECTIONS } from "../lib/firebase";
-import { getAllowedClasses } from "../lib/accessControl";
+import { getAllowedClasses, getWaliKelasForClass } from "../lib/accessControl";
 import { notifySimpanSuccess, notifySimpanError } from "../lib/swal";
 import { DEFAULT_TP_TEMPLATES, cleanTpText, filterBankTpItems, generateDynamicTpDescription } from "../lib/tpUtils";
 import { getClassActiveSubjects } from "../lib/classSubjectUtils";
@@ -29,6 +29,7 @@ interface InputPenilaianViewProps {
   bankTpList?: BankTpItem[];
   config: Pengaturan;
   currentUser?: User | null;
+  userList?: User[];
 }
 
 export const InputPenilaianView: React.FC<InputPenilaianViewProps> = ({
@@ -37,7 +38,8 @@ export const InputPenilaianView: React.FC<InputPenilaianViewProps> = ({
   nilaiList,
   bankTpList = [],
   config,
-  currentUser = null
+  currentUser = null,
+  userList = []
 }) => {
   const [selectedKelas, setSelectedKelas] = useState<string>(() => {
     try {
@@ -423,8 +425,8 @@ export const InputPenilaianView: React.FC<InputPenilaianViewProps> = ({
               catatanWaliKelas: "Tingkatkan terus prestasimu.",
               tempatTitimangsa: config.Tempat_Tanda_Tangan || "Kab. Bogor",
               tanggalRaport: new Date().toISOString().split("T")[0],
-              namaGuruWali: config.Nama_Guru || "Guru",
-              nipGuruWali: config.NIP_Guru || "-",
+              namaGuruWali: getWaliKelasForClass(s.kelas, userList, currentUser, config).nama,
+              nipGuruWali: getWaliKelasForClass(s.kelas, userList, currentUser, config).nip,
               namaKepsek: config.Nama_Kepsek || "SUBUR, S.Pd.SD.",
               nipKepsek: config.NIP_Kepsek || "197002111993081001"
             };
@@ -560,8 +562,8 @@ export const InputPenilaianView: React.FC<InputPenilaianViewProps> = ({
             catatanWaliKelas: "Tingkatkan terus prestasimu.",
             tempatTitimangsa: "Kab. Bogor",
             tanggalRaport: new Date().toISOString().split("T")[0],
-            namaGuruWali: config.Nama_Guru || "Guru",
-            nipGuruWali: config.NIP_Guru || "-",
+            namaGuruWali: getWaliKelasForClass(s.kelas, userList, currentUser, config).nama,
+            nipGuruWali: getWaliKelasForClass(s.kelas, userList, currentUser, config).nip,
             namaKepsek: config.Nama_Kepala_Sekolah || "SUBUR, S.Pd.SD.",
             nipKepsek: config.NIP_Kepala_Sekolah || "197002111993081001"
           };

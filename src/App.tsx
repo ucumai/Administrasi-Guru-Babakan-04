@@ -597,6 +597,7 @@ export default function App() {
               bankTpList={bankTpList}
               config={config}
               currentUser={currentUser}
+              userList={userList}
             />
           )}
 

@@ -56,7 +56,7 @@ import {
 } from "../types";
 import { KopSuratDinas } from "./KopSuratDinas";
 import { saveDocument, deleteDocument, batchSaveDocuments, batchSaveToMultipleCollections, subscribeCollection, COLLECTIONS } from "../lib/firebase";
-import { getAllowedClasses } from "../lib/accessControl";
+import { getAllowedClasses, getWaliKelasForClass } from "../lib/accessControl";
 import { 
   notifySimpanSuccess, 
   notifySimpanError, 
@@ -1547,18 +1547,8 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
         status: "Naik Kelas",
         keKelas: nextClassStr
       } : undefined,
-      namaGuruWali: (() => {
-        const matchedWali = userList.find(
-          (u) => u.role === "guru_kelas" && u.kelasUtama && u.kelasUtama.toLowerCase().trim() === siswa.kelas.toLowerCase().trim()
-        );
-        return matchedWali?.nama || matchedWali?.name || config.Nama_Guru || "Wali Kelas";
-      })(),
-      nipGuruWali: (() => {
-        const matchedWali = userList.find(
-          (u) => u.role === "guru_kelas" && u.kelasUtama && u.kelasUtama.toLowerCase().trim() === siswa.kelas.toLowerCase().trim()
-        );
-        return matchedWali?.nip || config.NIP_Guru || "-";
-      })(),
+      namaGuruWali: getWaliKelasForClass(siswa.kelas, userList, currentUser, config).nama,
+      nipGuruWali: getWaliKelasForClass(siswa.kelas, userList, currentUser, config).nip,
       namaKepsek: config.Nama_Kepsek || "SUBUR, S.Pd.SD.",
       nipKepsek: config.NIP_Kepsek || "197002111993081001"
     };
