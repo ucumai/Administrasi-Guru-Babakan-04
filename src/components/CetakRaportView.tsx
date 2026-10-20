@@ -521,6 +521,15 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
     } catch {}
   };
 
+  // Homeroom teacher overrides per class
+  const [homeroomOverrides, setHomeroomOverrides] = useState<{ [kelas: string]: { nama: string; nip: string } }>(() => {
+    try {
+      const saved = localStorage.getItem("edadmin_raport_homeroom_overrides");
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return {};
+  });
+
   // Import State
   const [importPreviewData, setImportPreviewData] = useState<any[]>([]);
   const [importErrors, setImportErrors] = useState<string[]>([]);
@@ -1547,8 +1556,8 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
         status: "Naik Kelas",
         keKelas: nextClassStr
       } : undefined,
-      namaGuruWali: getWaliKelasForClass(siswa.kelas, userList, currentUser, config).nama,
-      nipGuruWali: getWaliKelasForClass(siswa.kelas, userList, currentUser, config).nip,
+      namaGuruWali: (homeroomOverrides[siswa.kelas] || homeroomOverrides[selectedKelas] || getWaliKelasForClass(siswa.kelas, userList, currentUser, config)).nama,
+      nipGuruWali: (homeroomOverrides[siswa.kelas] || homeroomOverrides[selectedKelas] || getWaliKelasForClass(siswa.kelas, userList, currentUser, config)).nip,
       namaKepsek: config.Nama_Kepsek || "SUBUR, S.Pd.SD.",
       nipKepsek: config.NIP_Kepsek || "197002111993081001"
     };
@@ -2571,7 +2580,10 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
             </label>
             <select
               value={selectedKelas}
-              onChange={(e) => setSelectedKelas(e.target.value)}
+              onChange={(e) => {
+                setSelectedKelas(e.target.value);
+                setSelectedSiswaId("all");
+              }}
               className="w-full text-xs font-semibold px-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-700 text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-blue-500 focus:outline-none"
             >
               {allowedClasses.map((cls) => (
@@ -2677,6 +2689,118 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
               </span>
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* Panel Pengaturan Wali Kelas & Tanda Tangan Khusus Kelas Ini */}
+      <div className="bg-gradient-to-r from-indigo-50/90 via-blue-50/80 to-sky-50/90 dark:bg-slate-800/90 rounded-2xl p-4 border border-indigo-200 dark:border-indigo-800/60 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4 print:hidden">
+        <div className="space-y-1">
+          <div className="flex items-center space-x-2">
+            <Users className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+            <h4 className="text-xs font-bold uppercase tracking-wider text-indigo-900 dark:text-indigo-200">
+              Pengaturan Tanda Tangan Wali Kelas ({selectedKelas})
+            </h4>
+          </div>
+          <p className="text-[11px] text-slate-600 dark:text-slate-400">
+            Pilih guru pengampu atau wali kelas yang sah untuk kelas ini. Perubahan akan otomatis diterapkan ke seluruh lembar rapor siswa di kelas {selectedKelas}.
+          </p>
+        </div>
+
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+          <select
+            value={homeroomOverrides[selectedKelas]?.nama ? `${homeroomOverrides[selectedKelas].nama}|${homeroomOverrides[selectedKelas].nip}` : ""}
+            onChange={(e) => {
+              const val = e.target.value;
+              if (!val) {
+                const next = { ...homeroomOverrides };
+                delete next[selectedKelas];
+                setHomeroomOverrides(next);
+                try { localStorage.setItem("edadmin_raport_homeroom_overrides", JSON.stringify(next)); } catch {}
+              } else {
+                const [nama, nip] = val.split("|");
+                const next = { ...homeroomOverrides, [selectedKelas]: { nama, nip } };
+                setHomeroomOverrides(next);
+                try { localStorage.setItem("edadmin_raport_homeroom_overrides", JSON.stringify(next)); } catch {}
+              }
+            }}
+            className="text-xs font-semibold px-3 py-2 rounded-xl border border-indigo-300 dark:border-indigo-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:outline-none min-w-[260px]"
+          >
+            <option value="">-- Otomatis (Default Sistem / Guru Login) --</option>
+            {userList && userList.length > 0 ? (
+              userList.map((u) => {
+                const uName = u.nama || u.name || "Guru";
+                const uNip = u.nip || "-";
+                const uKelas = u.kelasUtama ? ` (Wali Kelas ${u.kelasUtama})` : ` (${u.role || "Guru"})`;
+                return (
+                  <option key={u.id || uName} value={`${uName}|${uNip}`}>
+                    {uName} - NIP. {uNip}{uKelas}
+                  </option>
+                );
+              })
+            ) : (
+              <option value={`${currentUser?.nama || "Wali Kelas"}|${currentUser?.nip || "-"}`}>
+                {currentUser?.nama || "Wali Kelas"} - NIP. {currentUser?.nip || "-"}
+              </option>
+            )}
+          </select>
+
+          <button
+            type="button"
+            onClick={() => {
+              const currentWali = homeroomOverrides[selectedKelas] || getWaliKelasForClass(selectedKelas, userList, currentUser, config);
+              let updatedCount = 0;
+              const nextRecords = { ...raportRecords };
+
+              classStudents.forEach((s) => {
+                const cleanTahun = selectedTahunAjaran.replace(/\//g, "-");
+                const primaryId = `raport_${s.id}_${cleanTahun}_${selectedPeriode}`;
+                const altId1 = `raport_${s.id}_${selectedPeriode}_${cleanTahun}`;
+                const altId2 = `raport_${s.id}_${selectedPeriode}`;
+
+                const existing = getRaportForStudent(s);
+                const updatedRec = {
+                  ...existing,
+                  id: primaryId,
+                  idSiswa: s.id,
+                  kelas: s.kelas,
+                  tahunAjaran: selectedTahunAjaran,
+                  periode: selectedPeriode,
+                  namaGuruWali: currentWali.nama,
+                  nipGuruWali: currentWali.nip,
+                  updatedAt: Date.now()
+                };
+
+                nextRecords[primaryId] = updatedRec;
+                nextRecords[altId1] = updatedRec;
+                nextRecords[altId2] = updatedRec;
+
+                saveDocument(COLLECTIONS.RAPORT_RECORDS, primaryId, updatedRec as any);
+                saveDocument(COLLECTIONS.RAPORT_RECORDS, altId1, updatedRec as any);
+                saveDocument(COLLECTIONS.BUKU_INDUK, primaryId, updatedRec as any);
+                saveDocument(COLLECTIONS.BUKU_INDUK, altId1, updatedRec as any);
+                saveDocument(COLLECTIONS.BUKU_INDUK, altId2, updatedRec as any);
+
+                updatedCount++;
+              });
+
+              setRaportRecords(nextRecords);
+              try {
+                localStorage.setItem("edadmin_persisted_raport_records", JSON.stringify(nextRecords));
+              } catch {}
+
+              Swal.fire({
+                icon: "success",
+                title: "Wali Kelas Berhasil Diterapkan!",
+                text: `Nama ${currentWali.nama} (NIP. ${currentWali.nip}) telah disimpan dan diterapkan ke ${updatedCount} siswa di ${selectedKelas}.`,
+                timer: 2200,
+                showConfirmButton: false
+              });
+            }}
+            className="inline-flex items-center justify-center space-x-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm transition active:scale-95 cursor-pointer"
+          >
+            <CheckSquare className="w-4 h-4" />
+            <span>Terapkan ke Semua Lembar Rapor</span>
+          </button>
         </div>
       </div>
 
