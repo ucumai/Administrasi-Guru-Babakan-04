@@ -55,7 +55,7 @@ import {
   BankTpItem
 } from "../types";
 import { KopSuratDinas } from "./KopSuratDinas";
-import { saveDocument, deleteDocument, batchSaveDocuments, subscribeCollection, COLLECTIONS } from "../lib/firebase";
+import { saveDocument, deleteDocument, batchSaveDocuments, batchSaveToMultipleCollections, subscribeCollection, COLLECTIONS } from "../lib/firebase";
 import { getAllowedClasses } from "../lib/accessControl";
 import { 
   notifySimpanSuccess, 
@@ -366,6 +366,20 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
   const [tempatTitimangsa, setTempatTitimangsa] = useState<string>(config.Tempat_Tanda_Tangan || "Kab. Bogor");
   const [showTtdKepsek, setShowTtdKepsek] = useState<boolean>(true);
   const [showKopSekolah, setShowKopSekolah] = useState<boolean>(true);
+  const [showCatatanKemajuan, setShowCatatanKemajuan] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem("edadmin_raport_show_catatan_kemajuan");
+      if (saved !== null) return saved === "true";
+    } catch {}
+    return true;
+  });
+
+  // Auto-persist showCatatanKemajuan state
+  useEffect(() => {
+    try {
+      localStorage.setItem("edadmin_raport_show_catatan_kemajuan", String(showCatatanKemajuan));
+    } catch {}
+  }, [showCatatanKemajuan]);
 
   // Auto-persist filter state changes
   useEffect(() => {
@@ -2221,7 +2235,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
 
           const tableBody = finalNilaiMapel.map((nm, i) => {
             let descText = nm.capaianKompetensiTinggi || nm.deskripsi || "";
-            if (nm.capaianKompetensiPerluBimbingan) {
+            if (showCatatanKemajuan && nm.capaianKompetensiPerluBimbingan) {
               if (descText) {
                 descText = `${descText}\n* ${nm.capaianKompetensiPerluBimbingan}`;
               } else {
@@ -2249,7 +2263,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
 
           autoTable(doc, {
             startY: tableAY + 1.8,
-            head: [["No", "Mata Pelajaran", "Nilai Akhir", "Capaian Kompetensi / Deskripsi Kemajuan Belajar"]],
+            head: [["No", "Mata Pelajaran", "Nilai Akhir", `Capaian Kompetensi${showCatatanKemajuan ? " / Deskripsi Kemajuan Belajar" : ""}`]],
             body: tableBody,
             theme: "grid",
             pageBreak: "avoid",
@@ -2990,6 +3004,34 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
                     {showKopSekolah ? "TAMPIL" : "SEMBUNYI"}
                   </span>
                 </button>
+
+                {/* Tombol Tampilkan / Sembunyikan Deskripsi Kemajuan Belajar & Penguatan (*) */}
+                <button
+                  type="button"
+                  onClick={() => setShowCatatanKemajuan(!showCatatanKemajuan)}
+                  className={`inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition border cursor-pointer select-none ${
+                    showCatatanKemajuan
+                      ? "bg-amber-50 border-amber-300 text-amber-800 dark:bg-amber-950/40 dark:border-amber-700 dark:text-amber-200 shadow-xs"
+                      : "bg-slate-50 border-slate-200 text-slate-500 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-400 opacity-90"
+                  }`}
+                  title="Klik untuk menampilkan atau menyembunyikan deskripsi kemajuan belajar / catatan bimbingan (*) pada raport"
+                >
+                  {showCatatanKemajuan ? (
+                    <CheckSquare className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                  ) : (
+                    <Square className="w-4 h-4 text-slate-400" />
+                  )}
+                  <span>Catatan Kemajuan (*)</span>
+                  <span
+                    className={`text-[10px] px-1.5 py-0.5 rounded font-extrabold ${
+                      showCatatanKemajuan
+                        ? "bg-amber-600 text-white"
+                        : "bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300"
+                    }`}
+                  >
+                    {showCatatanKemajuan ? "TAMPIL" : "SEMBUNYI"}
+                  </span>
+                </button>
               </div>
             </div>
 
@@ -3162,7 +3204,9 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
                                     <th className="p-1 border border-black text-center w-7">No</th>
                                     <th className="p-1 border border-black w-40">Mata Pelajaran</th>
                                     <th className="p-1 border border-black text-center w-14">Nilai Akhir</th>
-                                    <th className="p-1 border border-black">Capaian Kompetensi / Deskripsi Kemajuan Belajar</th>
+                                    <th className="p-1 border border-black">
+                                      Capaian Kompetensi{showCatatanKemajuan ? " / Deskripsi Kemajuan Belajar" : ""}
+                                    </th>
                                   </tr>
                                 </thead>
                                 <tbody>
@@ -3183,7 +3227,7 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
                                         <td className="p-1 border border-black text-center font-bold text-slate-900">{nm.nilaiAkhir}</td>
                                         <td className="p-1 border border-black text-[9px] leading-snug text-slate-800">
                                           <p>{nm.capaianKompetensiTinggi || nm.deskripsi}</p>
-                                          {nm.capaianKompetensiPerluBimbingan && (
+                                          {showCatatanKemajuan && nm.capaianKompetensiPerluBimbingan && (
                                             <p className="mt-0.5 text-slate-600 italic">
                                               * {nm.capaianKompetensiPerluBimbingan}
                                             </p>
