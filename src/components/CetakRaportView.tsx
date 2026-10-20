@@ -65,7 +65,7 @@ import {
   confirmDeleteAlert 
 } from "../lib/swal";
 import Swal from "sweetalert2";
-import { filterBankTpItems, generateDynamicTpDescription, getDefaultTpTemplateForMapel } from "../lib/tpUtils";
+import { filterBankTpItems, generateDynamicTpDescription, getDefaultTpTemplateForMapel, concatenateTpTexts } from "../lib/tpUtils";
 
 interface CetakRaportViewProps {
   siswaList: Siswa[];
@@ -155,25 +155,18 @@ function getFaseByClass(kelas: string): string {
 }
 
 function generateDefaultDeskripsi(mapel: string, nilaiNum: number): { tinggi: string; perluBimbingan: string } {
-  if (nilaiNum >= 90) {
+  const tps = DEFAULT_TP_TEMPLATES[mapel] || getDefaultTpTemplateForMapel(mapel);
+  const joinedTps = concatenateTpTexts(tps, mapel);
+  const num = Number(nilaiNum);
+  if (num > 75) {
     return {
-      tinggi: `Menunjukkan penguasaan yang sangat istimewa dalam seluruh materi pokok dan tujuan pembelajaran ${mapel}. Mampu bernalar kritis dan mandiri.`,
-      perluBimbingan: `Pertahankan prestasi unggul dan perluas pengayaan pada studi kasus aplikatif.`
-    };
-  } else if (nilaiNum >= 80) {
-    return {
-      tinggi: `Menunjukkan penguasaan materi yang sangat baik dalam memahami konsep dasar dan penerapan capaian pembelajaran ${mapel}.`,
-      perluBimbingan: `Perlu peningkatan konsistensi pemahaman pada pendalaman materi yang lebih kompleks.`
-    };
-  } else if (nilaiNum >= 75) {
-    return {
-      tinggi: `Menunjukkan pemahaman yang baik dan telah mencapai kriteria ketuntasan minimal pada mata pelajaran ${mapel}.`,
-      perluBimbingan: `Perlu pendampingan dan latihan tambahan pada beberapa indikator soal dan pemecahan masalah.`
+      tinggi: `Menunjukkan penguasaan sangat baik dalam ${joinedTps}.`,
+      perluBimbingan: `Pertahankan prestasi dan tingkatkan kemandirian dalam pendalaman ${joinedTps}.`
     };
   } else {
     return {
-      tinggi: `Menunjukkan kemauan belajar yang cukup pada konsep pengenalan materi ${mapel}.`,
-      perluBimbingan: `Sangat membutuhkan bimbingan intensif dan remedial untuk mencapai tujuan pembelajaran pokok.`
+      tinggi: `Perlu peningkatan konsistensi pemahaman dan pendampingan dalam ${joinedTps}.`,
+      perluBimbingan: `Perlu peningkatan konsistensi pemahaman dan pendampingan dalam ${joinedTps}.`
     };
   }
 }

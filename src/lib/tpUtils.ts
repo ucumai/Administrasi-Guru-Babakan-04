@@ -353,17 +353,17 @@ export function generateDynamicTpDescription(
   // 3. Gabungkan seluruh TP secara alami (Smart Concatenation)
   const joinedTps = concatenateTpTexts(rawList, mapel);
 
-  // 4. Standar Ketuntasan (KKTP)
-  const isTuntas = Number(nilaiNum) >= kktp;
+  // 4. Standar Ketuntasan (> 75 vs <= 75)
+  const num = Number(nilaiNum);
 
-  if (isTuntas) {
+  if (num > 75) {
     return {
       tinggi: `Menunjukkan penguasaan sangat baik dalam ${joinedTps}.`,
       perluBimbingan: `Pertahankan prestasi dan tingkatkan kemandirian dalam pendalaman ${joinedTps}.`
     };
   } else {
     return {
-      tinggi: `Menunjukkan kemauan belajar dan pemahaman dasar dalam ${joinedTps}.`,
+      tinggi: `Perlu peningkatan konsistensi pemahaman dan pendampingan dalam ${joinedTps}.`,
       perluBimbingan: `Perlu peningkatan konsistensi pemahaman dan pendampingan dalam ${joinedTps}.`
     };
   }
