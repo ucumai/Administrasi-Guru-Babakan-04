@@ -43,6 +43,7 @@ import {
 import { initMidnightAutoRefresh, onDayRollover, getLocalDateStr } from "./lib/dateUtils";
 import { initSecurityProtection, cleanupSecurityProtection } from "./lib/securityProtection";
 import { applyGlobalTheme } from "./lib/themeManager";
+import { isMenuAllowedForUser } from "./lib/menuAccess";
 
 import { 
   Siswa, 
@@ -455,17 +456,14 @@ export default function App() {
     localStorage.setItem("edadmin_user_session", JSON.stringify(user));
   };
 
-  // Tab safety check for guru_ekskul
+  // Tab safety check: Non-admin users can only view permitted tabs
   useEffect(() => {
-    if (currentUser?.role === "guru_ekskul") {
-      const allowedEkskulTabs = [
-        "dashboard", "siswa", "kartu", "mapel", "jadwal", "absensi", "penilaian", "bank_tp", "point_kedisiplinan", "agenda", "laporan"
-      ];
-      if (!allowedEkskulTabs.includes(activeTab)) {
+    if (currentUser && currentUser.role !== "admin") {
+      if (!isMenuAllowedForUser(activeTab, currentUser, config)) {
         handleTabChange("dashboard");
       }
     }
-  }, [currentUser, activeTab]);
+  }, [currentUser, activeTab, config]);
 
   const handleLogout = () => {
     setCurrentUser(null);

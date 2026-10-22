@@ -29,12 +29,18 @@ import {
   Cpu,
   FileCode2,
   Palette,
-  Zap
+  Zap,
+  Search,
+  RotateCcw,
+  CheckSquare,
+  Square,
+  Filter
 } from "lucide-react";
 import { Pengaturan, User, RoleUser } from "../types";
 import { savePengaturan, saveDocument, deleteDocument, COLLECTIONS } from "../lib/firebase";
 import { compressImage } from "../lib/imageCompressor";
 import { THEME_PRESETS, applyGlobalTheme } from "../lib/themeManager";
+import { ALL_CONFIGURABLE_MENUS, DEFAULT_ROLE_MENUS, ConfigurableMenu } from "../lib/menuAccess";
 import { 
   notifySimpanSuccess, 
   notifySimpanError, 
@@ -76,7 +82,207 @@ export const PengaturanView: React.FC<PengaturanViewProps> = ({
   onNavigateToSheets,
   availableClasses = ["Kelas 1", "Kelas 2", "Kelas 3A", "Kelas 3B", "Kelas 4", "Kelas 5", "Kelas 6", "Pramuka", "Silat", "Hadroh", "Drumband"]
 }) => {
-  const [activeSubTab, setActiveSubTab] = useState<"profil" | "users" | "keamanan" | "tampilan">("profil");
+  const [activeSubTab, setActiveSubTab] = useState<"profil" | "users" | "menu_akses" | "keamanan" | "tampilan">("profil");
+
+  // Hak Akses Menu Guru State (Admin configurable)
+  const [menuAccessMode, setMenuAccessMode] = useState<"role" | "individual">("role");
+  const [selectedTargetRole, setSelectedTargetRole] = useState<"guru_kelas" | "guru_mapel" | "guru_ekskul">("guru_kelas");
+  const [selectedTargetUserId, setSelectedTargetUserId] = useState<string>("");
+  const [menuSearchQuery, setMenuSearchQuery] = useState<string>("");
+  const [menuGroupFilter, setMenuGroupFilter] = useState<string>("ALL");
+  const [isSavingMenuAkses, setIsSavingMenuAkses] = useState(false);
+
+  const [roleMenuState, setRoleMenuState] = useState<{
+    guru_kelas: string[];
+    guru_mapel: string[];
+    guru_ekskul: string[];
+  }>(() => ({
+    guru_kelas: config?.menuAksesGuru?.guru_kelas || [...DEFAULT_ROLE_MENUS.guru_kelas],
+    guru_mapel: config?.menuAksesGuru?.guru_mapel || [...DEFAULT_ROLE_MENUS.guru_mapel],
+    guru_ekskul: config?.menuAksesGuru?.guru_ekskul || [...DEFAULT_ROLE_MENUS.guru_ekskul],
+  }));
+
+  const [individualMenuState, setIndividualMenuState] = useState<string[]>([]);
+
+  // Keep roleMenuState in sync if config updates from firebase
+  useEffect(() => {
+    if (config?.menuAksesGuru) {
+      setRoleMenuState({
+        guru_kelas: config.menuAksesGuru.guru_kelas || [...DEFAULT_ROLE_MENUS.guru_kelas],
+        guru_mapel: config.menuAksesGuru.guru_mapel || [...DEFAULT_ROLE_MENUS.guru_mapel],
+        guru_ekskul: config.menuAksesGuru.guru_ekskul || [...DEFAULT_ROLE_MENUS.guru_ekskul],
+      });
+    }
+  }, [config?.menuAksesGuru]);
+
+  // Keep individualMenuState in sync when selected user changes
+  useEffect(() => {
+    if (selectedTargetUserId) {
+      const u = userList.find((user) => user.id === selectedTargetUserId);
+      if (u) {
+        if (Array.isArray(u.customAllowedMenus) && u.customAllowedMenus.length > 0) {
+          setIndividualMenuState([...u.customAllowedMenus]);
+        } else {
+          const role = u.role as "guru_kelas" | "guru_mapel" | "guru_ekskul";
+          const fallback = roleMenuState[role] || DEFAULT_ROLE_MENUS[role] || DEFAULT_ROLE_MENUS.guru_kelas;
+          setIndividualMenuState([...fallback]);
+        }
+      }
+    }
+  }, [selectedTargetUserId, userList, roleMenuState]);
+
+  // If in individual mode and none selected, auto-select first non-admin teacher
+  useEffect(() => {
+    if (menuAccessMode === "individual" && !selectedTargetUserId) {
+      const firstTeacher = userList.find((u) => u.role !== "admin");
+      if (firstTeacher) {
+        setSelectedTargetUserId(firstTeacher.id);
+      }
+    }
+  }, [menuAccessMode, selectedTargetUserId, userList]);
+
+  // Menu Access Handlers
+  const handleToggleMenu = (menuId: string) => {
+    if (menuAccessMode === "role") {
+      setRoleMenuState((prev) => {
+        const cur = prev[selectedTargetRole] || [];
+        const next = cur.includes(menuId) ? cur.filter((id) => id !== menuId) : [...cur, menuId];
+        return { ...prev, [selectedTargetRole]: next };
+      });
+    } else {
+      setIndividualMenuState((prev) => 
+        prev.includes(menuId) ? prev.filter((id) => id !== menuId) : [...prev, menuId]
+      );
+    }
+  };
+
+  const handleSelectAllMenus = (enable: boolean) => {
+    const allIds = ALL_CONFIGURABLE_MENUS.map((m) => m.id);
+    if (menuAccessMode === "role") {
+      setRoleMenuState((prev) => ({
+        ...prev,
+        [selectedTargetRole]: enable ? allIds : []
+      }));
+    } else {
+      setIndividualMenuState(enable ? allIds : []);
+    }
+  };
+
+  const handleResetToDefaultRole = () => {
+    if (menuAccessMode === "role") {
+      setRoleMenuState((prev) => ({
+        ...prev,
+        [selectedTargetRole]: [...DEFAULT_ROLE_MENUS[selectedTargetRole]]
+      }));
+    } else {
+      const u = userList.find((user) => user.id === selectedTargetUserId);
+      if (u) {
+        const role = u.role as "guru_kelas" | "guru_mapel" | "guru_ekskul";
+        const fallback = roleMenuState[role] || DEFAULT_ROLE_MENUS[role] || DEFAULT_ROLE_MENUS.guru_kelas;
+        setIndividualMenuState([...fallback]);
+      }
+    }
+  };
+
+  const handleToggleGroupMenus = (groupName: string, enable: boolean) => {
+    const groupMenuIds = ALL_CONFIGURABLE_MENUS.filter((m) => m.group === groupName).map((m) => m.id);
+    if (menuAccessMode === "role") {
+      setRoleMenuState((prev) => {
+        const cur = prev[selectedTargetRole] || [];
+        let next: string[];
+        if (enable) {
+          next = Array.from(new Set([...cur, ...groupMenuIds]));
+        } else {
+          next = cur.filter((id) => !groupMenuIds.includes(id));
+        }
+        return { ...prev, [selectedTargetRole]: next };
+      });
+    } else {
+      setIndividualMenuState((prev) => {
+        if (enable) {
+          return Array.from(new Set([...prev, ...groupMenuIds]));
+        } else {
+          return prev.filter((id) => !groupMenuIds.includes(id));
+        }
+      });
+    }
+  };
+
+  const handleSaveRoleMenuAccess = async () => {
+    setIsSavingMenuAkses(true);
+    try {
+      const updatedConfig: Pengaturan = {
+        ...config,
+        menuAksesGuru: roleMenuState
+      };
+      await savePengaturan(updatedConfig);
+      notifySimpanSuccess(
+        `Pengaturan hak akses menu untuk "${
+          selectedTargetRole === "guru_kelas"
+            ? "Guru Kelas"
+            : selectedTargetRole === "guru_mapel"
+            ? "Guru Mapel"
+            : "Guru Ekskul"
+        }" berhasil disimpan ke Firebase!`
+      );
+    } catch (err: any) {
+      notifySimpanError(err?.message || "Gagal menyimpan hak akses menu.");
+    } finally {
+      setIsSavingMenuAkses(false);
+    }
+  };
+
+  const handleSaveIndividualMenuAccess = async () => {
+    if (!selectedTargetUserId) return;
+    const targetUser = userList.find((u) => u.id === selectedTargetUserId);
+    if (!targetUser) return;
+
+    setIsSavingMenuAkses(true);
+    try {
+      const updatedUser: User = {
+        ...targetUser,
+        customAllowedMenus: individualMenuState,
+        updatedAt: Date.now()
+      };
+      await saveDocument(COLLECTIONS.USERS, targetUser.id, updatedUser);
+      notifySimpanSuccess(`Hak akses menu khusus untuk "${targetUser.nama}" berhasil disimpan!`);
+    } catch (err: any) {
+      notifySimpanError(err?.message || "Gagal menyimpan hak akses khusus guru.");
+    } finally {
+      setIsSavingMenuAkses(false);
+    }
+  };
+
+  const handleResetIndividualToRoleInherit = async () => {
+    if (!selectedTargetUserId) return;
+    const targetUser = userList.find((u) => u.id === selectedTargetUserId);
+    if (!targetUser) return;
+
+    const confirmed = await confirmDeleteAlert(
+      "Hapus Hak Akses Khusus",
+      `Kembalikan hak akses menu untuk "${targetUser.nama}" agar otomatis mengikuti standar peran "${targetUser.role}"?`
+    );
+
+    if (confirmed) {
+      setIsSavingMenuAkses(true);
+      try {
+        const { customAllowedMenus, ...userWithoutCustom } = targetUser;
+        await saveDocument(COLLECTIONS.USERS, targetUser.id, {
+          ...userWithoutCustom,
+          customAllowedMenus: [],
+          updatedAt: Date.now()
+        });
+        const role = targetUser.role as "guru_kelas" | "guru_mapel" | "guru_ekskul";
+        const fallback = roleMenuState[role] || DEFAULT_ROLE_MENUS[role] || DEFAULT_ROLE_MENUS.guru_kelas;
+        setIndividualMenuState([...fallback]);
+        notifySimpanSuccess(`Hak akses khusus "${targetUser.nama}" dihapus, sekarang mengikuti standar peran.`);
+      } catch (err: any) {
+        notifySimpanError(err?.message || "Gagal mereset hak akses khusus.");
+      } finally {
+        setIsSavingMenuAkses(false);
+      }
+    }
+  };
 
   // Theme Customizer State
   const [selectedPreset, setSelectedPreset] = useState<string>(() => config?.themeConfig?.presetId || "ocean");
@@ -385,6 +591,17 @@ export const PengaturanView: React.FC<PengaturanViewProps> = ({
             >
               <Users className="w-4 h-4" />
               <span>Kelola User ({userList.length})</span>
+            </button>
+            <button
+              onClick={() => setActiveSubTab("menu_akses")}
+              className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center space-x-2 cursor-pointer ${
+                activeSubTab === "menu_akses"
+                  ? "bg-blue-600 text-white shadow-xs"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+              }`}
+            >
+              <Sliders className="w-4 h-4 text-amber-400" />
+              <span>Hak Akses Menu Guru</span>
             </button>
             <button
               onClick={() => setActiveSubTab("keamanan")}
@@ -1288,6 +1505,450 @@ export const PengaturanView: React.FC<PengaturanViewProps> = ({
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* TAB 2.5: HAK AKSES MENU GURU (ADMIN-ONLY) */}
+        {activeSubTab === "menu_akses" && (
+          <div className="space-y-6">
+            {/* Header Card */}
+            <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 shadow-xs space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-4">
+                <div className="flex items-center space-x-3">
+                  <div className="p-3 bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 rounded-2xl">
+                    <Sliders className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="font-extrabold text-slate-800 dark:text-white text-base uppercase tracking-wide flex items-center gap-2">
+                      HAK AKSES & VISIBILITAS MENU GURU
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Tentukan menu apa saja di sidebar yang dapat dilihat dan diakses oleh guru. Guru tidak dapat mengakses menu yang dinonaktifkan.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center space-x-2 self-start sm:self-auto">
+                  <span className="px-3 py-1 rounded-full bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 text-[11px] font-bold">
+                    👑 Hak Istimewa Admin Utama
+                  </span>
+                </div>
+              </div>
+
+              {/* Mode Switcher: Role-Based vs Individual Teacher */}
+              <div className="flex flex-col sm:flex-row gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setMenuAccessMode("role")}
+                  className={`flex-1 p-3.5 rounded-2xl border text-left transition-all cursor-pointer ${
+                    menuAccessMode === "role"
+                      ? "bg-blue-50/70 dark:bg-blue-950/50 border-blue-500 text-blue-900 dark:text-blue-200 shadow-xs"
+                      : "bg-slate-50/60 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-slate-300"
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-black uppercase tracking-wider flex items-center gap-1.5">
+                      <Users className="w-4 h-4 text-blue-600" />
+                      Atur Berdasarkan Peran Guru (Global)
+                    </span>
+                    {menuAccessMode === "role" && <CheckCircle2 className="w-4 h-4 text-blue-600" />}
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Konfigurasi berlaku serentak untuk semua Guru Kelas, Guru Mapel, atau Guru Ekskul.
+                  </p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setMenuAccessMode("individual")}
+                  className={`flex-1 p-3.5 rounded-2xl border text-left transition-all cursor-pointer ${
+                    menuAccessMode === "individual"
+                      ? "bg-purple-50/70 dark:bg-purple-950/50 border-purple-500 text-purple-900 dark:text-purple-200 shadow-xs"
+                      : "bg-slate-50/60 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-slate-300"
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-black uppercase tracking-wider flex items-center gap-1.5">
+                      <UserCheck className="w-4 h-4 text-purple-600" />
+                      Atur Khusus per Guru Individu (Override)
+                    </span>
+                    {menuAccessMode === "individual" && <CheckCircle2 className="w-4 h-4 text-purple-600" />}
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Beri hak akses khusus untuk guru tertentu yang berbeda dari standar perannya.
+                  </p>
+                </button>
+              </div>
+
+              {/* Selection Bar depending on Mode */}
+              {menuAccessMode === "role" ? (
+                <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-3">
+                  <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 uppercase">
+                    Pilih Peran Guru yang Ingin Diatur:
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedTargetRole("guru_kelas")}
+                      className={`p-3 rounded-xl border text-left transition-all flex items-center justify-between cursor-pointer ${
+                        selectedTargetRole === "guru_kelas"
+                          ? "bg-blue-600 text-white border-blue-600 shadow-md"
+                          : "bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 border-slate-300 dark:border-slate-700 hover:border-blue-400"
+                      }`}
+                    >
+                      <div>
+                        <p className="text-xs font-black">👩‍🏫 Guru Kelas / Wali</p>
+                        <p className={`text-[10px] mt-0.5 ${selectedTargetRole === "guru_kelas" ? "text-blue-100" : "text-slate-500"}`}>
+                          {(roleMenuState.guru_kelas || []).length} dari {ALL_CONFIGURABLE_MENUS.length} Menu Aktif
+                        </p>
+                      </div>
+                      {selectedTargetRole === "guru_kelas" && <Check className="w-4 h-4 text-white" />}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setSelectedTargetRole("guru_mapel")}
+                      className={`p-3 rounded-xl border text-left transition-all flex items-center justify-between cursor-pointer ${
+                        selectedTargetRole === "guru_mapel"
+                          ? "bg-blue-600 text-white border-blue-600 shadow-md"
+                          : "bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 border-slate-300 dark:border-slate-700 hover:border-blue-400"
+                      }`}
+                    >
+                      <div>
+                        <p className="text-xs font-black">📘 Guru Mata Pelajaran</p>
+                        <p className={`text-[10px] mt-0.5 ${selectedTargetRole === "guru_mapel" ? "text-blue-100" : "text-slate-500"}`}>
+                          {(roleMenuState.guru_mapel || []).length} dari {ALL_CONFIGURABLE_MENUS.length} Menu Aktif
+                        </p>
+                      </div>
+                      {selectedTargetRole === "guru_mapel" && <Check className="w-4 h-4 text-white" />}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setSelectedTargetRole("guru_ekskul")}
+                      className={`p-3 rounded-xl border text-left transition-all flex items-center justify-between cursor-pointer ${
+                        selectedTargetRole === "guru_ekskul"
+                          ? "bg-blue-600 text-white border-blue-600 shadow-md"
+                          : "bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 border-slate-300 dark:border-slate-700 hover:border-blue-400"
+                      }`}
+                    >
+                      <div>
+                        <p className="text-xs font-black">🎨 Guru Ekstrakurikuler</p>
+                        <p className={`text-[10px] mt-0.5 ${selectedTargetRole === "guru_ekskul" ? "text-blue-100" : "text-slate-500"}`}>
+                          {(roleMenuState.guru_ekskul || []).length} dari {ALL_CONFIGURABLE_MENUS.length} Menu Aktif
+                        </p>
+                      </div>
+                      {selectedTargetRole === "guru_ekskul" && <Check className="w-4 h-4 text-white" />}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 uppercase">
+                      Pilih Guru yang Ingin Diberikan Akses Khusus:
+                    </label>
+
+                    {(() => {
+                      const currentSelectedUser = userList.find((u) => u.id === selectedTargetUserId);
+                      const hasCustom = Array.isArray(currentSelectedUser?.customAllowedMenus) && currentSelectedUser.customAllowedMenus.length > 0;
+                      if (hasCustom) {
+                        return (
+                          <button
+                            type="button"
+                            onClick={handleResetIndividualToRoleInherit}
+                            className="text-[11px] font-bold text-red-600 dark:text-red-400 hover:underline flex items-center space-x-1 cursor-pointer self-start sm:self-auto"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            <span>Hapus Khusus (Kembalikan ke Standar Peran)</span>
+                          </button>
+                        );
+                      }
+                      return null;
+                    })()}
+                  </div>
+
+                  <select
+                    value={selectedTargetUserId}
+                    onChange={(e) => setSelectedTargetUserId(e.target.value)}
+                    className="w-full px-3.5 py-2.5 text-xs font-semibold rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-800 dark:text-white outline-none focus:border-purple-500"
+                  >
+                    {userList
+                      .filter((u) => u.role !== "admin")
+                      .map((u) => {
+                        const hasCustom = Array.isArray(u.customAllowedMenus) && u.customAllowedMenus.length > 0;
+                        const roleLabel =
+                          u.role === "guru_kelas"
+                            ? `Guru Kelas ${u.kelasUtama || ""}`
+                            : u.role === "guru_mapel"
+                            ? `Guru Mapel (${u.mapelDiampu || "Multi"})`
+                            : "Guru Ekskul";
+                        return (
+                          <option key={u.id} value={u.id}>
+                            {u.nama} ({u.username}) — {roleLabel} {hasCustom ? "⭐ [Khusus]" : "[Standar]"}
+                          </option>
+                        );
+                      })}
+                  </select>
+
+                  {/* Status Banner for Individual Teacher */}
+                  {(() => {
+                    const currentSelectedUser = userList.find((u) => u.id === selectedTargetUserId);
+                    if (!currentSelectedUser) return null;
+                    const hasCustom = Array.isArray(currentSelectedUser.customAllowedMenus) && currentSelectedUser.customAllowedMenus.length > 0;
+                    return (
+                      <div className={`p-3 rounded-xl border text-xs flex items-center justify-between ${
+                        hasCustom 
+                          ? "bg-purple-50 dark:bg-purple-950/40 border-purple-200 dark:border-purple-800 text-purple-900 dark:text-purple-300"
+                          : "bg-blue-50 dark:bg-blue-950/40 border-blue-200 dark:border-blue-800 text-blue-900 dark:text-blue-300"
+                      }`}>
+                        <div className="flex items-center space-x-2">
+                          <CheckCircle2 className="w-4 h-4 shrink-0" />
+                          <span>
+                            {hasCustom 
+                              ? `Guru ini menggunakan hak akses khusus (${individualMenuState.length} menu aktif).`
+                              : `Guru ini saat ini mengikuti pengaturan standar peran (${currentSelectedUser.role}). Klik menu di bawah dan simpan untuk membuat hak akses khusus.`}
+                          </span>
+                        </div>
+                        <span className="text-[10px] font-mono font-bold uppercase px-2 py-0.5 rounded bg-white dark:bg-slate-900 shrink-0">
+                          {hasCustom ? "CUSTOM OVERRIDE" : "INHERIT ROLE"}
+                        </span>
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+
+              {/* Quick Action Toolbar & Search */}
+              <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 pt-2">
+                {/* Search Bar */}
+                <div className="relative flex-1">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={menuSearchQuery}
+                    onChange={(e) => setMenuSearchQuery(e.target.value)}
+                    placeholder="Cari nama menu atau fungsi (contoh: Raport, Kuis, AI)..."
+                    className="w-full pl-9 pr-4 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 outline-none focus:border-blue-500 text-slate-800 dark:text-slate-100"
+                  />
+                  {menuSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setMenuSearchQuery("")}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Quick Action Buttons */}
+                <div className="flex flex-wrap items-center gap-1.5 self-start md:self-auto">
+                  <button
+                    type="button"
+                    onClick={() => handleSelectAllMenus(true)}
+                    className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-lg text-xs font-bold flex items-center space-x-1 cursor-pointer transition"
+                  >
+                    <CheckSquare className="w-3.5 h-3.5 text-emerald-500" />
+                    <span>Aktifkan Semua</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleSelectAllMenus(false)}
+                    className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-lg text-xs font-bold flex items-center space-x-1 cursor-pointer transition"
+                  >
+                    <Square className="w-3.5 h-3.5 text-red-500" />
+                    <span>Matikan Semua</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleResetToDefaultRole}
+                    className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-lg text-xs font-bold flex items-center space-x-1 cursor-pointer transition"
+                    title="Kembalikan ke preset default bawaan kurikulum"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5 text-blue-500" />
+                    <span>Reset Bawaan</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleToggleGroupMenus("KECERDASAN BUATAN (AI)", false)}
+                    className="px-2.5 py-1.5 bg-purple-50 hover:bg-purple-100 dark:bg-purple-950/40 dark:hover:bg-purple-900/40 text-purple-700 dark:text-purple-300 rounded-lg text-xs font-bold flex items-center space-x-1 cursor-pointer transition"
+                    title="Nonaktifkan semua menu AI untuk peran ini"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-purple-500" />
+                    <span>Matikan AI</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Menu Groups & Cards */}
+            {(() => {
+              const activeMenuList = menuAccessMode === "role" 
+                ? (roleMenuState[selectedTargetRole] || [])
+                : individualMenuState;
+
+              const groups = ["MENU UTAMA", "AKADEMIK", "KECERDASAN BUATAN (AI)", "SISTEM & OUTPUT"] as const;
+
+              return (
+                <div className="space-y-6">
+                  {groups.map((groupName) => {
+                    const groupItems = ALL_CONFIGURABLE_MENUS.filter((item) => {
+                      if (item.group !== groupName) return false;
+                      if (!menuSearchQuery.trim()) return true;
+                      const q = menuSearchQuery.toLowerCase();
+                      return item.label.toLowerCase().includes(q) || item.deskripsi.toLowerCase().includes(q);
+                    });
+
+                    if (groupItems.length === 0) return null;
+
+                    const allGroupItems = ALL_CONFIGURABLE_MENUS.filter((item) => item.group === groupName);
+                    const enabledCount = allGroupItems.filter((item) => activeMenuList.includes(item.id)).length;
+                    const isAllGroupEnabled = enabledCount === allGroupItems.length;
+
+                    const groupColorMap: Record<string, { badge: string; border: string }> = {
+                      "MENU UTAMA": { badge: "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300", border: "border-blue-500/30" },
+                      "AKADEMIK": { badge: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300", border: "border-emerald-500/30" },
+                      "KECERDASAN BUATAN (AI)": { badge: "bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300", border: "border-purple-500/30" },
+                      "SISTEM & OUTPUT": { badge: "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300", border: "border-amber-500/30" },
+                    };
+
+                    const colorInfo = groupColorMap[groupName] || { badge: "bg-slate-100 text-slate-700", border: "border-slate-500/30" };
+
+                    return (
+                      <div key={groupName} className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-5 shadow-xs space-y-4">
+                        {/* Group Header */}
+                        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+                          <div className="flex items-center space-x-2.5">
+                            <span className={`text-[11px] font-black uppercase px-2.5 py-1 rounded-lg ${colorInfo.badge}`}>
+                              {groupName}
+                            </span>
+                            <span className="text-xs font-bold text-slate-500 dark:text-slate-400">
+                              ({enabledCount} dari {allGroupItems.length} Aktif)
+                            </span>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => handleToggleGroupMenus(groupName, !isAllGroupEnabled)}
+                            className="text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline flex items-center space-x-1 cursor-pointer"
+                          >
+                            <span>{isAllGroupEnabled ? "Matikan Seluruh Grup" : "Aktifkan Seluruh Grup"}</span>
+                          </button>
+                        </div>
+
+                        {/* Cards Grid */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                          {groupItems.map((item) => {
+                            const isAllowed = activeMenuList.includes(item.id);
+                            return (
+                              <div
+                                key={item.id}
+                                onClick={() => handleToggleMenu(item.id)}
+                                className={`p-3.5 rounded-2xl border transition-all cursor-pointer select-none flex flex-col justify-between space-y-2 ${
+                                  isAllowed
+                                    ? "bg-blue-50/40 dark:bg-blue-950/30 border-blue-400 dark:border-blue-600 shadow-xs ring-1 ring-blue-500/20"
+                                    : "bg-slate-50/50 dark:bg-slate-800/30 border-slate-200 dark:border-slate-800 opacity-65 hover:opacity-100 hover:border-slate-300"
+                                }`}
+                              >
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="space-y-0.5">
+                                    <div className="flex items-center space-x-2">
+                                      <h4 className={`text-xs font-black ${
+                                        isAllowed 
+                                          ? "text-slate-900 dark:text-white" 
+                                          : "text-slate-600 dark:text-slate-400"
+                                      }`}>
+                                        {item.label}
+                                      </h4>
+                                    </div>
+                                    <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                                      {item.deskripsi}
+                                    </p>
+                                  </div>
+
+                                  {/* Custom Checkbox Pill */}
+                                  <div className={`w-5 h-5 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
+                                    isAllowed
+                                      ? "bg-blue-600 text-white"
+                                      : "border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800"
+                                  }`}>
+                                    {isAllowed && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center justify-between pt-1 border-t border-slate-100 dark:border-slate-800/80">
+                                  <span className="font-mono text-[9px] text-slate-400 dark:text-slate-500">
+                                    ID: {item.id}
+                                  </span>
+                                  <span className={`text-[10px] font-black ${
+                                    isAllowed 
+                                      ? "text-emerald-600 dark:text-emerald-400" 
+                                      : "text-slate-400 dark:text-slate-500"
+                                  }`}>
+                                    {isAllowed ? "DIIZINKAN" : "TERSEMBUNYI"}
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+
+            {/* Bottom Floating/Sticky Save Action Bar */}
+            <div className="sticky bottom-4 z-20 bg-slate-900/95 dark:bg-slate-950/95 backdrop-blur-md text-white p-4 rounded-3xl border border-slate-700 shadow-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center space-x-3">
+                <div className="p-2.5 bg-blue-600/30 text-blue-400 rounded-xl border border-blue-500/40">
+                  <Sliders className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-xs font-black">
+                    {menuAccessMode === "role"
+                      ? `Pengaturan Menu Peran: ${
+                          selectedTargetRole === "guru_kelas"
+                            ? "Guru Kelas / Wali"
+                            : selectedTargetRole === "guru_mapel"
+                            ? "Guru Mapel"
+                            : "Guru Ekskul"
+                        }`
+                      : `Pengaturan Menu Khusus: ${
+                          userList.find((u) => u.id === selectedTargetUserId)?.nama || "Guru Terpilih"
+                        }`}
+                  </p>
+                  <p className="text-[11px] text-slate-300">
+                    {menuAccessMode === "role"
+                      ? `${(roleMenuState[selectedTargetRole] || []).length} dari ${ALL_CONFIGURABLE_MENUS.length} menu aktif.`
+                      : `${individualMenuState.length} dari ${ALL_CONFIGURABLE_MENUS.length} menu aktif untuk guru ini.`}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <button
+                  type="button"
+                  disabled={isSavingMenuAkses}
+                  onClick={menuAccessMode === "role" ? handleSaveRoleMenuAccess : handleSaveIndividualMenuAccess}
+                  className="w-full sm:w-auto bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-extrabold py-3 px-6 rounded-2xl text-xs flex items-center justify-center space-x-2 shadow-lg cursor-pointer transition-all disabled:opacity-50"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>
+                    {isSavingMenuAkses 
+                      ? "Menyimpan ke Server..." 
+                      : menuAccessMode === "role" 
+                      ? "Simpan Hak Akses Peran Ini" 
+                      : "Simpan Hak Akses Khusus Guru"}
+                  </span>
+                </button>
+              </div>
+            </div>
           </div>
         )}
 

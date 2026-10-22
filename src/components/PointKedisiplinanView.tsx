@@ -617,6 +617,22 @@ export const PointKedisiplinanView: React.FC<PointKedisiplinanViewProps> = ({
     return getWaliKelasForClass(selectedKelas, userList, currentUser, config);
   }, [selectedKelas, userList, currentUser, config]);
 
+  // Option to show or hide Kepala Sekolah signature
+  const [showTtdKepsek, setShowTtdKepsek] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem("edadmin_point_show_ttd_kepsek");
+      return saved !== null ? JSON.parse(saved) : true;
+    } catch {
+      return true;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("edadmin_point_show_ttd_kepsek", JSON.stringify(showTtdKepsek));
+    } catch {}
+  }, [showTtdKepsek]);
+
   // Print Report Card via Browser
   const reportPrintRef = useRef<HTMLDivElement>(null);
   const handlePrintRaport = () => {
@@ -718,28 +734,45 @@ export const PointKedisiplinanView: React.FC<PointKedisiplinanViewProps> = ({
       const finalY = (doc as any).lastAutoTable?.finalY ? (doc as any).lastAutoTable.finalY + 15 : 200;
       doc.setFontSize(8.5);
       doc.setFont("helvetica", "normal");
-
-      // Column 1: Parent
-      doc.text("Mengetahui,", 35, finalY, { align: "center" });
-      doc.text("Orang Tua / Wali Murid,", 35, finalY + 5, { align: "center" });
-      doc.text("( .................................................... )", 35, finalY + 28, { align: "center" });
-
-      // Column 2: Homeroom Teacher
       const dateStr = new Date().toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" });
-      doc.text(`${config.Tempat_Tanda_Tangan || "Kab. Bogor"}, ${dateStr}`, 165, finalY, { align: "center" });
-      doc.text("Guru Kelas / Wali Kelas,", 165, finalY + 5, { align: "center" });
-      doc.setFont("helvetica", "bold");
-      doc.text(waliInfo.nama || "Wali Kelas", 165, finalY + 25, { align: "center" });
-      doc.setFont("helvetica", "normal");
-      doc.text(`NIP. ${waliInfo.nip || "-"}`, 165, finalY + 29, { align: "center" });
 
-      // Headmaster Center
-      doc.text("Mengetahui,", 105, finalY + 22, { align: "center" });
-      doc.text("Kepala Sekolah,", 105, finalY + 27, { align: "center" });
-      doc.setFont("helvetica", "bold");
-      doc.text(config.Nama_Kepsek || config.Nama_Kepala_Sekolah || "SUBUR, S.Pd.SD.", 105, finalY + 45, { align: "center" });
-      doc.setFont("helvetica", "normal");
-      doc.text(`NIP. ${config.NIP_Kepsek || config.NIP_Kepala_Sekolah || "197002111993081001"}`, 105, finalY + 49, { align: "center" });
+      if (showTtdKepsek) {
+        // 3 Kolom: Orang Tua (x=35), Kepala Sekolah (x=105), Guru Kelas (x=165)
+        // Column 1: Parent
+        doc.text("Mengetahui,", 35, finalY, { align: "center" });
+        doc.text("Orang Tua / Wali Murid,", 35, finalY + 5, { align: "center" });
+        doc.text("( .................................................... )", 35, finalY + 28, { align: "center" });
+
+        // Column 2: Homeroom Teacher
+        doc.text(`${config.Tempat_Tanda_Tangan || "Kab. Bogor"}, ${dateStr}`, 165, finalY, { align: "center" });
+        doc.text("Guru Kelas / Wali Kelas,", 165, finalY + 5, { align: "center" });
+        doc.setFont("helvetica", "bold");
+        doc.text(waliInfo.nama || "Wali Kelas", 165, finalY + 25, { align: "center" });
+        doc.setFont("helvetica", "normal");
+        doc.text(`NIP. ${waliInfo.nip || "-"}`, 165, finalY + 29, { align: "center" });
+
+        // Headmaster Center
+        doc.text("Mengetahui,", 105, finalY + 22, { align: "center" });
+        doc.text("Kepala Sekolah,", 105, finalY + 27, { align: "center" });
+        doc.setFont("helvetica", "bold");
+        doc.text(config.Nama_Kepsek || config.Nama_Kepala_Sekolah || "SUBUR, S.Pd.SD.", 105, finalY + 45, { align: "center" });
+        doc.setFont("helvetica", "normal");
+        doc.text(`NIP. ${config.NIP_Kepsek || config.NIP_Kepala_Sekolah || "197002111993081001"}`, 105, finalY + 49, { align: "center" });
+      } else {
+        // 2 Kolom Seimbang: Orang Tua (x=45) dan Guru Kelas (x=160)
+        // Column 1: Parent
+        doc.text("Mengetahui,", 45, finalY, { align: "center" });
+        doc.text("Orang Tua / Wali Murid,", 45, finalY + 5, { align: "center" });
+        doc.text("( .................................................... )", 45, finalY + 28, { align: "center" });
+
+        // Column 2: Homeroom Teacher
+        doc.text(`${config.Tempat_Tanda_Tangan || "Kab. Bogor"}, ${dateStr}`, 160, finalY, { align: "center" });
+        doc.text("Guru Kelas / Wali Kelas,", 160, finalY + 5, { align: "center" });
+        doc.setFont("helvetica", "bold");
+        doc.text(waliInfo.nama || "Wali Kelas", 160, finalY + 25, { align: "center" });
+        doc.setFont("helvetica", "normal");
+        doc.text(`NIP. ${waliInfo.nip || "-"}`, 160, finalY + 29, { align: "center" });
+      }
 
       doc.save(`Raport_Kedisiplinan_${st.nama.replace(/\s+/g, "_")}.pdf`);
       showToastSuccess("Raport Kedisiplinan PDF berhasil diunduh!");
@@ -1788,6 +1821,28 @@ export const PointKedisiplinanView: React.FC<PointKedisiplinanViewProps> = ({
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
+              {/* Toggle TTD Kepala Sekolah */}
+              <button
+                type="button"
+                onClick={() => setShowTtdKepsek(!showTtdKepsek)}
+                className={`inline-flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs font-bold transition border cursor-pointer ${
+                  showTtdKepsek
+                    ? "bg-indigo-50 border-indigo-300 text-indigo-700 dark:bg-indigo-950/40 dark:border-indigo-700 dark:text-indigo-300"
+                    : "bg-slate-100 border-slate-300 text-slate-500 dark:bg-slate-700 dark:border-slate-600 dark:text-slate-400"
+                }`}
+                title="Klik untuk menampilkan atau menyembunyikan tanda tangan Kepala Sekolah pada raport kedisiplinan"
+              >
+                {showTtdKepsek ? (
+                  <CheckSquare className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                ) : (
+                  <Square className="w-3.5 h-3.5 text-slate-400" />
+                )}
+                <span>TTD Kepala Sekolah:</span>
+                <span className={`text-[10px] px-1.5 py-0.5 rounded font-extrabold ${showTtdKepsek ? "bg-indigo-600 text-white" : "bg-slate-300 text-slate-700 dark:bg-slate-600 dark:text-slate-200"}`}>
+                  {showTtdKepsek ? "TAMPIL" : "SEMBUNYI"}
+                </span>
+              </button>
+
               <button
                 type="button"
                 onClick={handleCopyWhatsAppSummary}
@@ -1969,7 +2024,7 @@ export const PointKedisiplinanView: React.FC<PointKedisiplinanViewProps> = ({
                 </div>
 
                 {/* Tanda Tangan */}
-                <div className="pt-6 grid grid-cols-3 gap-2 text-center text-[10.5px] text-slate-900">
+                <div className={`pt-6 ${showTtdKepsek ? "grid grid-cols-3 gap-2" : "flex justify-between px-10"} text-center text-[10.5px] text-slate-900`}>
                   <div className="space-y-12">
                     <div>
                       <p>Mengetahui,</p>
@@ -1980,16 +2035,18 @@ export const PointKedisiplinanView: React.FC<PointKedisiplinanViewProps> = ({
                     </p>
                   </div>
 
-                  <div className="space-y-12">
-                    <div>
-                      <p>Mengetahui,</p>
-                      <p className="font-semibold">Kepala Sekolah</p>
+                  {showTtdKepsek && (
+                    <div className="space-y-12">
+                      <div>
+                        <p>Mengetahui,</p>
+                        <p className="font-semibold">Kepala Sekolah</p>
+                      </div>
+                      <div>
+                        <p className="font-bold underline">{config.Nama_Kepsek || config.Nama_Kepala_Sekolah || "SUBUR, S.Pd.SD."}</p>
+                        <p className="text-[9.5px]">NIP. {config.NIP_Kepsek || config.NIP_Kepala_Sekolah || "197002111993081001"}</p>
+                      </div>
                     </div>
-                    <div>
-                      <p className="font-bold underline">{config.Nama_Kepsek || config.Nama_Kepala_Sekolah || "SUBUR, S.Pd.SD."}</p>
-                      <p className="text-[9.5px]">NIP. {config.NIP_Kepsek || config.NIP_Kepala_Sekolah || "197002111993081001"}</p>
-                    </div>
-                  </div>
+                  )}
 
                   <div className="space-y-12">
                     <div>

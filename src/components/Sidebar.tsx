@@ -38,6 +38,8 @@ import {
 } from "lucide-react";
 import { User, Pengaturan } from "../types";
 
+import { isMenuAllowedForUser } from "../lib/menuAccess";
+
 interface SidebarProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
@@ -58,100 +60,66 @@ export const Sidebar: React.FC<SidebarProps> = ({
   config
 }) => {
   const isAdmin = currentUser?.role === "admin";
-  const isGuruKelas = currentUser?.role === "guru_kelas";
-  const isGuruMapel = currentUser?.role === "guru_mapel";
-  const isGuruEkskul = currentUser?.role === "guru_ekskul";
 
-  const navItems = isGuruEkskul
-    ? [
-        {
-          group: "MENU UTAMA",
-          items: [
-            { id: "dashboard", label: "Dashboard", icon: PieChart },
-            { id: "absen_kedatangan", label: "Absen Kedatangan Pagi", icon: Sun },
-            { id: "siswa", label: "Kelola Siswa", icon: Users },
-            { id: "kartu", label: "Cetak Kartu QR", icon: IdCard },
-            { id: "mapel", label: "Kelola Mapel", icon: BookOpen },
-          ]
-        },
-        {
-          group: "AKADEMIK",
-          items: [
-            { id: "jadwal", label: "Jadwal Mengajar", icon: Clock },
-            { id: "absensi", label: "Input Absensi", icon: ClipboardCheck },
-            { id: "penilaian", label: "Input Penilaian", icon: Star },
-            { id: "kuis_interaktif", label: "Kuis & Asesmen Cepat", icon: Gamepad2 },
-            { id: "portofolio_p5", label: "Portofolio & Rapor P5", icon: Compass },
-            { id: "bank_tp", label: "Bank TP (Tujuan Pembelajaran)", icon: BookmarkCheck },
-            { id: "raport", label: "Cetak Raport Siswa", icon: GraduationCap },
-            { id: "point_kedisiplinan", label: "Point Kedisiplinan Siswa", icon: Award, highlight: true },
-            { id: "agenda", label: "Agenda Mengajar", icon: Calendar },
-          ]
-        },
-        {
-          group: "SISTEM & OUTPUT",
-          items: [
-            { id: "cadangan_sheets", label: "Cadangan Google Sheets", icon: FileSpreadsheet, highlight: true },
-            { id: "laporan", label: "Pusat Laporan", icon: Printer },
-          ]
-        }
+  const rawNavItems = [
+    {
+      group: "MENU UTAMA",
+      items: [
+        { id: "dashboard", label: "Dashboard", icon: PieChart },
+        { id: "absen_kedatangan", label: "Absen Kedatangan Pagi", icon: Sun },
+        { id: "siswa", label: "Kelola Siswa", icon: Users },
+        { id: "kartu", label: "Cetak Kartu QR", icon: IdCard },
+        { id: "mapel", label: "Kelola Mapel", icon: BookOpen },
       ]
-    : [
-        {
-          group: "MENU UTAMA",
-          items: [
-            { id: "dashboard", label: "Dashboard", icon: PieChart },
-            { id: "absen_kedatangan", label: "Absen Kedatangan Pagi", icon: Sun },
-            { id: "siswa", label: "Kelola Siswa", icon: Users },
-            { id: "kartu", label: "Cetak Kartu QR", icon: IdCard },
-            { id: "mapel", label: "Kelola Mapel", icon: BookOpen },
-          ]
-        },
-        {
-          group: "AKADEMIK",
-          items: [
-            { id: "jadwal", label: "Jadwal Mengajar", icon: Clock },
-            { id: "absensi", label: "Input Absensi", icon: ClipboardCheck },
-            { id: "penilaian", label: "Input Penilaian", icon: Star },
-            { id: "kuis_interaktif", label: "Kuis & Asesmen Cepat", icon: Gamepad2 },
-            { id: "portofolio_p5", label: "Portofolio & Rapor P5", icon: Compass },
-            { id: "bank_tp", label: "Bank TP (Tujuan Pembelajaran)", icon: BookmarkCheck, highlight: true },
-            { id: "raport", label: "Cetak Raport Siswa", icon: GraduationCap },
-            { id: "point_kedisiplinan", label: "Point Kedisiplinan Siswa", icon: Award, highlight: true },
-            { id: "agenda", label: "Agenda Mengajar", icon: Calendar },
-            { id: "bimbingan", label: "Bimbingan Guru Wali", icon: HeartHandshake },
-            ...(isGuruMapel ? [] : [{ id: "tabungan", label: "Tabungan Kelas", icon: PiggyBank }]),
-            ...(isAdmin || isGuruKelas ? [
-              { id: "buku_induk", label: "Buku Induk Kelas", icon: BookMarked },
-              { id: "aset_kelas", label: "Aset Kelas", icon: Boxes },
-              { id: "stok_bhp", label: "Stok Opname BHP", icon: PackageSearch }
-            ] : []),
-            { id: "downloadperangkat", label: "Download Perangkat Ajar", icon: Download },
-          ]
-        },
-        {
-          group: "KECERDASAN BUATAN (AI)",
-          items: [
-            { id: "generator_soal", label: "Generator Soal & Bank Soal", icon: FileQuestion, highlight: true },
-            { id: "perangkat_ai", label: "Generator Perangkat Ajar AI", icon: FileCheck, highlight: true },
-            { id: "modulai", label: "Modul Ajar AI", icon: Wand2, highlight: true },
-            { id: "asistenai", label: "Asisten Guru AI", icon: Bot, highlight: true },
-            { id: "lkpdai", label: "Generator LKPD AI", icon: Sparkles, highlight: true },
-            { id: "ailainnya", label: "Generator AI Lainnya", icon: Globe, highlight: true },
-          ]
-        },
-        {
-          group: "SISTEM & OUTPUT",
-          items: [
-            { id: "cadangan_sheets", label: "Cadangan Google Sheets", icon: FileSpreadsheet, highlight: true },
-            { id: "laporan", label: "Pusat Laporan", icon: Printer },
-            { id: "pengaturan", label: "Pengaturan & User", icon: Settings },
-            ...(isAdmin
-              ? [{ id: "resetdb", label: "Hapus Isi Database", icon: Trash2, dangerous: true }]
-              : []),
-          ]
-        }
-      ];
+    },
+    {
+      group: "AKADEMIK",
+      items: [
+        { id: "jadwal", label: "Jadwal Mengajar", icon: Clock },
+        { id: "absensi", label: "Input Absensi", icon: ClipboardCheck },
+        { id: "penilaian", label: "Input Penilaian", icon: Star },
+        { id: "kuis_interaktif", label: "Kuis & Asesmen Cepat", icon: Gamepad2 },
+        { id: "portofolio_p5", label: "Portofolio & Rapor P5", icon: Compass },
+        { id: "bank_tp", label: "Bank TP (Tujuan Pembelajaran)", icon: BookmarkCheck, highlight: true },
+        { id: "raport", label: "Cetak Raport Siswa", icon: GraduationCap },
+        { id: "point_kedisiplinan", label: "Point Kedisiplinan Siswa", icon: Award, highlight: true },
+        { id: "agenda", label: "Agenda Mengajar", icon: Calendar },
+        { id: "bimbingan", label: "Bimbingan Guru Wali", icon: HeartHandshake },
+        { id: "tabungan", label: "Tabungan Kelas", icon: PiggyBank },
+        { id: "buku_induk", label: "Buku Induk Kelas", icon: BookMarked },
+        { id: "aset_kelas", label: "Aset Kelas", icon: Boxes },
+        { id: "stok_bhp", label: "Stok Opname BHP", icon: PackageSearch },
+        { id: "downloadperangkat", label: "Download Perangkat Ajar", icon: Download },
+      ]
+    },
+    {
+      group: "KECERDASAN BUATAN (AI)",
+      items: [
+        { id: "generator_soal", label: "Generator Soal & Bank Soal", icon: FileQuestion, highlight: true },
+        { id: "perangkat_ai", label: "Generator Perangkat Ajar AI", icon: FileCheck, highlight: true },
+        { id: "modulai", label: "Modul Ajar AI", icon: Wand2, highlight: true },
+        { id: "asistenai", label: "Asisten Guru AI", icon: Bot, highlight: true },
+        { id: "lkpdai", label: "Generator LKPD AI", icon: Sparkles, highlight: true },
+        { id: "ailainnya", label: "Generator AI Lainnya", icon: Globe, highlight: true },
+      ]
+    },
+    {
+      group: "SISTEM & OUTPUT",
+      items: [
+        { id: "cadangan_sheets", label: "Cadangan Google Sheets", icon: FileSpreadsheet, highlight: true },
+        { id: "laporan", label: "Pusat Laporan", icon: Printer },
+        { id: "pengaturan", label: "Pengaturan & User", icon: Settings },
+        ...(isAdmin
+          ? [{ id: "resetdb", label: "Hapus Isi Database", icon: Trash2, dangerous: true }]
+          : []),
+      ]
+    }
+  ];
+
+  const displayedNavItems = rawNavItems.map((group) => ({
+    ...group,
+    items: group.items.filter((item) => isMenuAllowedForUser(item.id, currentUser, config))
+  })).filter((group) => group.items.length > 0);
 
   return (
     <>
@@ -229,7 +197,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         {/* Navigation list */}
         <div className="flex-1 overflow-y-auto py-4 px-3 space-y-5 custom-scrollbar pb-safe">
-          {navItems.map((group, idx) => (
+          {displayedNavItems.map((group, idx) => (
             <div key={idx} className="space-y-1">
               <p className="px-3 text-[10px] font-bold text-blue-400 uppercase tracking-wider mb-2">
                 {group.group}

@@ -11,6 +11,7 @@ export interface User {
   kelasUtama?: string; // For guru_kelas, e.g. "Kelas 1", "VII A"
   kelasAkses?: string[]; // For guru_mapel, e.g. ["Kelas 1", "Kelas 2", "Kelas 3"]
   mapelDiampu?: string;
+  customAllowedMenus?: string[]; // Custom menu access overrides
   updatedAt?: number;
 }
 
@@ -206,6 +207,11 @@ export interface Pengaturan {
     gradientTo?: string;
     fontFamily?: 'inter' | 'jakarta' | 'outfit' | 'poppins';
     borderRadius?: 'sharp' | 'medium' | 'rounded' | 'full';
+  };
+  menuAksesGuru?: {
+    guru_kelas?: string[];
+    guru_mapel?: string[];
+    guru_ekskul?: string[];
   };
 }
 
