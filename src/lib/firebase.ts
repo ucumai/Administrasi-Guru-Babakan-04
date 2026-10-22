@@ -191,7 +191,9 @@ export const COLLECTIONS = {
   P5_PORTOFOLIO: "p5_portofolio",
   BANK_TP: "bank_tp",
   RAPORT_RECORDS: "raport_records",
-  AGGREGATED_SUMMARIES: "aggregated_summaries"
+  AGGREGATED_SUMMARIES: "aggregated_summaries",
+  POINT_KEDISIPLINAN: "point_kedisiplinan_logs",
+  TATA_TERTIB: "master_tata_tertib"
 };
 
 type CollectionListener<T = any> = (data: T[]) => void;

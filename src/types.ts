@@ -673,4 +673,34 @@ export interface P5PortofolioKarya {
   updatedAt?: number;
 }
 
+export interface TataTertibItem {
+  id: string;
+  kode?: string;
+  nama: string;
+  jenis: 'pelanggaran' | 'apresiasi';
+  kategori: 'ringan' | 'sedang' | 'berat' | 'prestasi' | 'kebiasaan_baik';
+  pointDefault: number;
+  keteranganDefault?: string;
+  updatedAt?: number;
+}
 
+export interface PointKedisiplinanLog {
+  id: string;
+  idSiswa: string;
+  namaSiswa: string;
+  nisn?: string;
+  nis?: string;
+  kelas: string;
+  tanggal: string; // YYYY-MM-DD
+  jenis: 'pelanggaran' | 'apresiasi';
+  kategori: string;
+  aturanTataTertib: string;
+  point: number; // positive number (e.g. 5, 10, 15)
+  keterangan?: string;
+  tindakLanjut?: string;
+  dicatatOleh: string;
+  semester?: 'Ganjil' | 'Genap' | string;
+  tahunAjaran?: string;
+  createdAt: number;
+  updatedAt?: number;
+}

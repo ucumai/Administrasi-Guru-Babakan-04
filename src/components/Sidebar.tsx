@@ -32,6 +32,7 @@ import {
   LogOut,
   User as UserIcon,
   ShieldCheck,
+  Award,
   Lock,
   FileSpreadsheet
 } from "lucide-react";
@@ -83,6 +84,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             { id: "portofolio_p5", label: "Portofolio & Rapor P5", icon: Compass },
             { id: "bank_tp", label: "Bank TP (Tujuan Pembelajaran)", icon: BookmarkCheck },
             { id: "raport", label: "Cetak Raport Siswa", icon: GraduationCap },
+            { id: "point_kedisiplinan", label: "Point Kedisiplinan Siswa", icon: Award, highlight: true },
             { id: "agenda", label: "Agenda Mengajar", icon: Calendar },
           ]
         },
@@ -115,6 +117,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             { id: "portofolio_p5", label: "Portofolio & Rapor P5", icon: Compass },
             { id: "bank_tp", label: "Bank TP (Tujuan Pembelajaran)", icon: BookmarkCheck, highlight: true },
             { id: "raport", label: "Cetak Raport Siswa", icon: GraduationCap },
+            { id: "point_kedisiplinan", label: "Point Kedisiplinan Siswa", icon: Award, highlight: true },
             { id: "agenda", label: "Agenda Mengajar", icon: Calendar },
             { id: "bimbingan", label: "Bimbingan Guru Wali", icon: HeartHandshake },
             ...(isGuruMapel ? [] : [{ id: "tabungan", label: "Tabungan Kelas", icon: PiggyBank }]),

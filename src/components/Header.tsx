@@ -22,6 +22,7 @@ const TAB_TITLES: Record<string, string> = {
   jadwal: "Jadwal Mengajar Guru",
   absensi: "Input Absensi Harian & QR Scanner",
   penilaian: "Input Nilai Akademik Siswa",
+  point_kedisiplinan: "Point Kedisiplinan & Karakter Siswa",
   agenda: "Jurnal Agenda Mengajar",
   bimbingan: "Catatan Bimbingan Guru Wali",
   downloadperangkat: "Download Perangkat Ajar (Deep Learning)",

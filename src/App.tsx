@@ -13,6 +13,7 @@ import { InputPenilaianView } from "./components/InputPenilaianView";
 import { KuisInteraktifView } from "./components/KuisInteraktifView";
 import { PortofolioP5View } from "./components/PortofolioP5View";
 import { CetakRaportView } from "./components/CetakRaportView";
+import { PointKedisiplinanView } from "./components/PointKedisiplinanView";
 import { BankTpView, INITIAL_DEFAULT_TPS } from "./components/BankTpView";
 import { AgendaMengajarView } from "./components/AgendaMengajarView";
 import { BimbinganWaliView } from "./components/BimbinganWaliView";
@@ -458,7 +459,7 @@ export default function App() {
   useEffect(() => {
     if (currentUser?.role === "guru_ekskul") {
       const allowedEkskulTabs = [
-        "dashboard", "siswa", "kartu", "mapel", "jadwal", "absensi", "penilaian", "bank_tp", "agenda", "laporan"
+        "dashboard", "siswa", "kartu", "mapel", "jadwal", "absensi", "penilaian", "bank_tp", "point_kedisiplinan", "agenda", "laporan"
       ];
       if (!allowedEkskulTabs.includes(activeTab)) {
         handleTabChange("dashboard");
@@ -641,6 +642,15 @@ export default function App() {
               config={config}
               currentUser={currentUser}
               onNavigateToBankTp={() => handleTabChange("bank_tp")}
+            />
+          )}
+
+          {activeTab === "point_kedisiplinan" && (
+            <PointKedisiplinanView
+              siswaList={siswaList}
+              userList={userList}
+              currentUser={currentUser}
+              config={config}
             />
           )}
 
