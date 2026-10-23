@@ -408,6 +408,7 @@ export interface RaportRecord {
   statusKenaikan?: {
     status: 'Naik Kelas' | 'Tidak Naik Kelas' | 'Lulus' | 'Belum Ditentukan';
     keKelas?: string;
+    tanggalKenaikan?: string;
   };
   tinggiBadan?: string;
   beratBadan?: string;

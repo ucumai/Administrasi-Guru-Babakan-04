@@ -124,6 +124,11 @@ export default function App() {
   // Current active date synced with midnight auto-refresh
   const [currentAppDate, setCurrentAppDate] = useState<string>(() => getLocalDateStr());
 
+  // Cross-Navigation between Cetak Raport & Buku Induk
+  const [navTargetBukuIndukSiswaId, setNavTargetBukuIndukSiswaId] = useState<string | null>(null);
+  const [navTargetRaportSiswaId, setNavTargetRaportSiswaId] = useState<string | null>(null);
+  const [navTargetRaportKelas, setNavTargetRaportKelas] = useState<string | null>(null);
+
   // Automatic midnight and background resume day rollover
   useEffect(() => {
     const cleanupWatcher = initMidnightAutoRefresh();
@@ -640,6 +645,12 @@ export default function App() {
               config={config}
               currentUser={currentUser}
               onNavigateToBankTp={() => handleTabChange("bank_tp")}
+              initialSelectedSiswaId={navTargetRaportSiswaId}
+              initialSelectedKelas={navTargetRaportKelas}
+              onNavigateToBukuInduk={(siswaId) => {
+                if (siswaId) setNavTargetBukuIndukSiswaId(siswaId);
+                handleTabChange("buku_induk");
+              }}
             />
           )}
 
@@ -690,6 +701,12 @@ export default function App() {
               logAbsensiList={absensiList}
               config={config}
               currentUser={currentUser}
+              initialSelectedSiswaId={navTargetBukuIndukSiswaId}
+              onNavigateToRaport={(siswaId, kelas) => {
+                if (siswaId) setNavTargetRaportSiswaId(siswaId);
+                if (kelas) setNavTargetRaportKelas(kelas);
+                handleTabChange("raport");
+              }}
             />
           )}
 

@@ -39,7 +39,8 @@ import {
   Check,
   MapPin,
   Table,
-  Filter
+  Filter,
+  BookMarked
 } from "lucide-react";
 
 import { 
@@ -78,6 +79,149 @@ interface CetakRaportViewProps {
   config: Pengaturan;
   currentUser?: User | null;
   onNavigateToBankTp?: () => void;
+  initialSelectedSiswaId?: string | null;
+  initialSelectedKelas?: string | null;
+  onNavigateToBukuInduk?: (siswaId?: string) => void;
+}
+
+// Convert RaportRecord to BukuIndukSiswa for seamless two-way synchronization
+export function buildBukuIndukFromRaport(
+  rec: RaportRecord,
+  student: Siswa,
+  existingBi?: BukuIndukSiswa
+): BukuIndukSiswa {
+  const numGrades = (rec.nilaiMapel || []).map((nm) => {
+    const numVal = Number(nm.nilaiAkhir) || 0;
+    let predikat = "B";
+    if (numVal >= 90) predikat = "A";
+    else if (numVal >= 80) predikat = "B";
+    else if (numVal >= 70) predikat = "C";
+    else if (numVal > 0) predikat = "D";
+    return {
+      namaMapel: nm.mapel,
+      kktp: nm.kktp ?? 75,
+      nilai: nm.nilaiAkhir,
+      predikat,
+      deskripsi: nm.capaianKompetensiTinggi || nm.deskripsi || ""
+    };
+  });
+
+  const convertedRaportData = {
+    semester: rec.semester || (rec.periode?.includes("genap") ? "Genap" : "Ganjil"),
+    tahunPelajaran: rec.tahunAjaran || "2024/2025",
+    nilaiPengetahuan: numGrades,
+    nilaiEkstrakurikuler: (rec.ekskul || []).map((e, idx) => ({
+      id: `esk_${idx + 1}`,
+      namaEskul: e.nama,
+      keteranganPredikat: `${e.predikat}${e.keterangan ? ' - ' + e.keterangan : ''}`
+    })),
+    nilaiPrestasi: (rec.prestasi || []).map((p, idx) => ({
+      id: `prs_${idx + 1}`,
+      jenisPrestasi: p.jenis,
+      keterangan: p.keterangan
+    })),
+    sakit: rec.kehadiran?.sakit ?? 0,
+    izin: rec.kehadiran?.izin ?? 0,
+    alpa: rec.kehadiran?.alpa ?? 0,
+    catatanWaliKelas: rec.catatanWaliKelas || "",
+    statusKenaikan: rec.statusKenaikan?.status || "Belum Ditentukan",
+    keKelas: rec.statusKenaikan?.keKelas || student.kelas,
+    tanggalKenaikan: rec.statusKenaikan?.tanggalKenaikan || rec.tanggalRaport || new Date().toISOString().split("T")[0],
+    tanggalRaport: rec.tanggalRaport,
+    tempatTitimangsa: rec.tempatTitimangsa
+  };
+
+  const biDocId = `bi_${student.id}`;
+
+  if (existingBi) {
+    return {
+      ...existingBi,
+      id: existingBi.id || biDocId,
+      idSiswa: student.id,
+      nis: existingBi.nis || student.nis || `100${student.id.slice(-3)}`,
+      nisn: existingBi.nisn || student.nisn || "",
+      kelas: student.kelas,
+      raport: convertedRaportData as any,
+      updatedAt: Date.now()
+    };
+  }
+
+  return {
+    id: biDocId,
+    idSiswa: student.id,
+    nis: student.nis || `100${student.id.slice(-3)}`,
+    nisn: student.nisn || "",
+    kelas: student.kelas,
+    pesertaDidik: {
+      namaLengkap: student.nama,
+      namaPanggilan: student.nama.split(" ")[0] || "",
+      jenisKelamin: "L",
+      tempatLahir: "Bogor",
+      tanggalLahir: "2016-01-01",
+      nik: "",
+      kewarganegaraan: "Indonesia",
+      anakKe: "1",
+      jumlahSaudaraKandung: "0",
+      jumlahSaudaraTiri: "0",
+      jumlahSaudaraAngkat: "0",
+      bahasaSehariHari: "Bahasa Indonesia",
+      golonganDarah: "O",
+      alamat: "Jl. Raya Babakan No. 12",
+      tempatTinggal: "Bersama Orang Tua",
+      jarakKeSekolah: "1 km"
+    },
+    orangTuaWali: {
+      namaAyah: "",
+      tanggalLahirAyah: "",
+      nikAyah: "",
+      pendidikanAyah: "SMA / Sederajat",
+      pekerjaanAyah: "Karyawan Swasta",
+      penghasilanAyah: "3.000.000 - 5.000.000",
+      agamaAyah: "Islam",
+      kewarganegaraanAyah: "Indonesia",
+      namaIbu: "",
+      tanggalLahirIbu: "",
+      nikIbu: "",
+      pendidikanIbu: "SMA / Sederajat",
+      pekerjaanIbu: "Ibu Rumah Tangga",
+      penghasilanIbu: "-",
+      agamaIbu: "Islam",
+      kewarganegaraanIbu: "Indonesia",
+      alamatOrangTua: "Jl. Raya Babakan No. 12",
+      namaWali: "",
+      hubunganKeluargaWali: "",
+      pendidikanWali: "",
+      pekerjaanWali: "",
+      alamatWali: ""
+    },
+    pendidikan: {
+      asalSiswa: "Siswa Baru / Dari TK",
+      masukDiKelas: student.kelas,
+      asalSekolahTkPaud: "TK Negeri Pembina",
+      diterimaTanggal: new Date().toISOString().split("T")[0]
+    },
+    meninggalkanSekolah: {
+      tahunLulus: "",
+      noIjazah: "",
+      melanjutkanKe: "",
+      pindahKelas: "",
+      pindahKeSekolah: "",
+      pindahTingkat: "",
+      keluarAlasan: "",
+      keluarTanggal: ""
+    },
+    kesehatan: {
+      tinggiBadan: "120",
+      beratBadan: "22",
+      lingkarKepala: "50",
+      pendengaran: "Baik",
+      penglihatan: "Baik",
+      gigi: "Baik",
+      lainLain: "Sehat Walafiat"
+    },
+    raport: convertedRaportData as any,
+    updatedAt: Date.now()
+  };
 }
 
 const DEFAULT_MAPEL_LIST = [
@@ -293,7 +437,10 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
   userList = [],
   config,
   currentUser,
-  onNavigateToBankTp
+  onNavigateToBankTp,
+  initialSelectedSiswaId,
+  initialSelectedKelas,
+  onNavigateToBukuInduk
 }) => {
   const allowedClasses = getAllowedClasses(currentUser, siswaList.map((s) => s.kelas));
   const isAdmin = currentUser?.role === "admin";
@@ -382,6 +529,20 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
   useEffect(() => {
     try { localStorage.setItem("edadmin_raport_selected_kelas", selectedKelas); } catch {}
   }, [selectedKelas]);
+
+  // Respond to cross-navigation from Buku Induk Kelas
+  useEffect(() => {
+    if (initialSelectedKelas) {
+      setSelectedKelas(initialSelectedKelas);
+    }
+    if (initialSelectedSiswaId) {
+      setSelectedSiswaId(initialSelectedSiswaId);
+      const student = siswaList.find((s) => s.id === initialSelectedSiswaId);
+      if (student && student.kelas) {
+        setSelectedKelas(student.kelas);
+      }
+    }
+  }, [initialSelectedSiswaId, initialSelectedKelas, siswaList]);
 
   // Auto-switch selectedKelas if current class has 0 students but database has students in another class
   useEffect(() => {
@@ -1590,13 +1751,24 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
 
     saveTimeoutRef.current[primaryId] = setTimeout(async () => {
       try {
-        await batchSaveToMultipleCollections([
+        const student = classStudents.find((s) => s.id === updated.idSiswa) || siswaList.find((s) => s.id === updated.idSiswa);
+        const existingBi = bukuIndukList?.find((b) => b.idSiswa === updated.idSiswa || (b.nisn && b.nisn === updated.nisn));
+
+        const ops: Array<{ collectionName: string; id: string; data: Record<string, any> }> = [
           { collectionName: COLLECTIONS.RAPORT_RECORDS, id: primaryId, data: withTimestamp },
           { collectionName: COLLECTIONS.RAPORT_RECORDS, id: altId1, data: withTimestamp },
           { collectionName: COLLECTIONS.BUKU_INDUK, id: primaryId, data: withTimestamp },
           { collectionName: COLLECTIONS.BUKU_INDUK, id: altId1, data: withTimestamp },
           { collectionName: COLLECTIONS.BUKU_INDUK, id: altId2, data: withTimestamp },
-        ]);
+        ];
+
+        // Also update actual Buku Induk Register document (id: bi_${idSiswa})
+        if (student) {
+          const biDoc = buildBukuIndukFromRaport(withTimestamp, student, existingBi);
+          ops.push({ collectionName: COLLECTIONS.BUKU_INDUK, id: biDoc.id, data: biDoc as any });
+        }
+
+        await batchSaveToMultipleCollections(ops);
         setLastAutoSaveTime(Date.now());
       } catch (e) {
         console.warn("Auto-save raport error:", e);
@@ -1612,6 +1784,11 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
 
       const batchOperations: Array<{ collectionName: string; id: string; data: Record<string, any> }> = [];
       for (const rec of recordsToSave) {
+        const student = classStudents.find((s) => s.id === rec.idSiswa) || siswaList.find((s) => s.id === rec.idSiswa);
+        const existingBi = bukuIndukList?.find(
+          (b) => b.idSiswa === rec.idSiswa || (b.nisn && b.nisn === rec.nisn)
+        );
+
         const cleanTahun = (rec.tahunAjaran || selectedTahunAjaran).replace(/\//g, "-");
         const fullDocId = `raport_${rec.idSiswa}_${cleanTahun}_${rec.periode || selectedPeriode}`;
         const altDocId = `raport_${rec.idSiswa}_${rec.periode || selectedPeriode}_${cleanTahun}`;
@@ -1619,8 +1796,15 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
 
         const recWithTs = { ...rec, id: fullDocId, updatedAt: Date.now() };
 
+        // Save to COLLECTIONS.RAPORT_RECORDS
         batchOperations.push({ collectionName: COLLECTIONS.RAPORT_RECORDS, id: fullDocId, data: recWithTs as any });
         batchOperations.push({ collectionName: COLLECTIONS.RAPORT_RECORDS, id: altDocId, data: recWithTs as any });
+
+        // Save to COLLECTIONS.BUKU_INDUK (both primary BukuInduk document and aliases)
+        if (student) {
+          const biDoc = buildBukuIndukFromRaport(recWithTs, student, existingBi);
+          batchOperations.push({ collectionName: COLLECTIONS.BUKU_INDUK, id: biDoc.id, data: biDoc as any });
+        }
         batchOperations.push({ collectionName: COLLECTIONS.BUKU_INDUK, id: fullDocId, data: recWithTs as any });
         batchOperations.push({ collectionName: COLLECTIONS.BUKU_INDUK, id: altDocId, data: recWithTs as any });
         batchOperations.push({ collectionName: COLLECTIONS.BUKU_INDUK, id: legacyDocId, data: recWithTs as any });
@@ -1646,9 +1830,68 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
       } catch {}
 
       setLastAutoSaveTime(Date.now());
-      notifySimpanSuccess("Data nilai dan Tujuan Pembelajaran raport berhasil disimpan permanen ke database!");
+      notifySimpanSuccess("Data nilai raport berhasil disimpan dan disinkronkan ke Buku Induk Register Kelas!");
     } catch (err: any) {
       notifySimpanError("Gagal menyimpan data raport: " + (err?.message || "Error"));
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Manual One-Click Bulk Synchronization to Buku Induk Kelas
+  const handleSyncClassToBukuInduk = async () => {
+    if (classStudents.length === 0) {
+      Swal.fire("Info", "Tidak ada siswa di kelas ini untuk disinkronkan.", "info");
+      return;
+    }
+
+    const confirm = await Swal.fire({
+      title: "Sinkronkan ke Buku Induk Kelas?",
+      text: `Seluruh data capaian nilai raport, predikat, ekstrakurikuler, dan presensi untuk ${classStudents.length} siswa di ${selectedKelas} akan diselaraskan langsung ke lembar Buku Induk Register Kelas.`,
+      icon: "question",
+      showCancelButton: true,
+      confirmButtonColor: "#4f46e5",
+      cancelButtonColor: "#64748b",
+      confirmButtonText: "⚡ Ya, Sinkronkan Sekarang!",
+      cancelButtonText: "Batal"
+    });
+
+    if (!confirm.isConfirmed) return;
+
+    setIsSaving(true);
+    try {
+      const recordsToSave: RaportRecord[] = classStudents.map((s) => getRaportForStudent(s));
+      const batchOperations: Array<{ collectionName: string; id: string; data: Record<string, any> }> = [];
+
+      for (const rec of recordsToSave) {
+        const student = classStudents.find((s) => s.id === rec.idSiswa) || siswaList.find((s) => s.id === rec.idSiswa);
+        if (!student) continue;
+
+        const cleanTahun = (rec.tahunAjaran || selectedTahunAjaran).replace(/\//g, "-");
+        const fullDocId = `raport_${rec.idSiswa}_${cleanTahun}_${rec.periode || selectedPeriode}`;
+        const altDocId = `raport_${rec.idSiswa}_${rec.periode || selectedPeriode}_${cleanTahun}`;
+        const recWithTs = { ...rec, id: fullDocId, updatedAt: Date.now() };
+
+        // Save Raport Records
+        batchOperations.push({ collectionName: COLLECTIONS.RAPORT_RECORDS, id: fullDocId, data: recWithTs as any });
+        batchOperations.push({ collectionName: COLLECTIONS.RAPORT_RECORDS, id: altDocId, data: recWithTs as any });
+
+        // Save into Buku Induk document (id: bi_${student.id})
+        const existingBi = bukuIndukList?.find((b) => b.idSiswa === student.id || (b.nisn && b.nisn === student.nisn));
+        const biDoc = buildBukuIndukFromRaport(recWithTs, student, existingBi);
+        batchOperations.push({ collectionName: COLLECTIONS.BUKU_INDUK, id: biDoc.id, data: biDoc as any });
+      }
+
+      await batchSaveToMultipleCollections(batchOperations);
+
+      Swal.fire({
+        icon: "success",
+        title: "Sinkronisasi Berhasil!",
+        text: `Data nilai raport ${classStudents.length} siswa di ${selectedKelas} telah berhasil disinkronkan ke Buku Induk Register Kelas.`,
+        confirmButtonColor: "#4f46e5"
+      });
+    } catch (err: any) {
+      Swal.fire("Gagal", "Gagal melakukan sinkronisasi: " + (err?.message || err), "error");
     } finally {
       setIsSaving(false);
     }
@@ -2466,6 +2709,26 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
 
           <div className="flex flex-wrap items-center gap-2">
             <button
+              onClick={handleSyncClassToBukuInduk}
+              className="inline-flex items-center space-x-2 px-3.5 py-2 rounded-xl bg-indigo-500 hover:bg-indigo-600 text-white text-xs font-bold transition shadow-md active:scale-95 cursor-pointer"
+              title="Sinkronkan seluruh data nilai raport siswa kelas ini ke Buku Induk Register Kelas"
+            >
+              <RefreshCw className={`w-4 h-4 ${isSaving ? "animate-spin" : ""}`} />
+              <span>Sinkron ke Buku Induk</span>
+            </button>
+
+            {onNavigateToBukuInduk && (
+              <button
+                onClick={() => onNavigateToBukuInduk()}
+                className="inline-flex items-center space-x-2 px-3.5 py-2 rounded-xl bg-white/20 hover:bg-white/30 text-white text-xs font-bold transition shadow-sm backdrop-blur-md active:scale-95 cursor-pointer"
+                title="Buka menu Buku Induk Register Kelas"
+              >
+                <BookMarked className="w-4 h-4 text-emerald-300" />
+                <span>Buku Induk Kelas</span>
+              </button>
+            )}
+
+            <button
               onClick={handleDownloadTemplate}
               className="inline-flex items-center space-x-2 px-3.5 py-2 rounded-xl bg-white/20 hover:bg-white/30 text-white text-xs font-bold transition shadow-sm backdrop-blur-md active:scale-95 cursor-pointer"
             >
@@ -3148,6 +3411,16 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
 
             <div className="flex flex-wrap items-center gap-2">
               <button
+                type="button"
+                onClick={handleSyncClassToBukuInduk}
+                className="inline-flex items-center space-x-2 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-md transition active:scale-95 cursor-pointer"
+                title="Sinkronkan nilai raport seluruh siswa di kelas ini ke Buku Induk Register Kelas"
+              >
+                <RefreshCw className={`w-4 h-4 ${isSaving ? "animate-spin" : ""}`} />
+                <span>Sinkron ke Buku Induk</span>
+              </button>
+
+              <button
                 onClick={handlePrint}
                 className="inline-flex items-center space-x-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-md transition active:scale-95 cursor-pointer"
               >
@@ -3181,9 +3454,56 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
               {studentsToPreview.map((student, sIdx) => {
                 if (!student) return null;
                 const studentRaport = getRaportForStudent(student);
+                const biRecord = bukuIndukList?.find((b) => b.idSiswa === student.id || (b.nisn && b.nisn === student.nisn));
 
                 return (
                   <React.Fragment key={student.id}>
+                    {/* Student Action Bar - Buku Induk Integration Shortcut */}
+                    <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-gradient-to-r from-indigo-50/90 to-blue-50/80 dark:from-slate-800 dark:to-slate-800/80 border border-indigo-200 dark:border-slate-700 rounded-2xl shadow-xs print:hidden max-w-[215mm] mx-auto w-full mb-3">
+                      <div className="flex items-center space-x-2.5">
+                        <div className="w-7 h-7 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-black text-xs shadow-xs">
+                          {sIdx + 1}
+                        </div>
+                        <div>
+                          <div className="flex items-center space-x-2">
+                            <span className="text-xs font-black text-slate-800 dark:text-white uppercase">
+                              {student.nama}
+                            </span>
+                            <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                              (NISN: {student.nisn || "-"} / NIS: {student.nis || "-"})
+                            </span>
+                          </div>
+                          <div className="flex items-center space-x-2 text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                            <span>{student.kelas}</span>
+                            <span>•</span>
+                            {biRecord ? (
+                              <span className="text-emerald-700 dark:text-emerald-400 font-bold flex items-center">
+                                <CheckCircle2 className="w-3 h-3 mr-1 inline text-emerald-600 dark:text-emerald-400" /> 
+                                Terhubung dengan Buku Induk Register Siswa
+                              </span>
+                            ) : (
+                              <span className="text-indigo-600 dark:text-indigo-400 font-bold flex items-center">
+                                <Sparkles className="w-3 h-3 mr-1 inline text-indigo-500" />
+                                Otomatis Tersinkron ke Buku Induk saat Disimpan
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {onNavigateToBukuInduk && (
+                        <button
+                          type="button"
+                          onClick={() => onNavigateToBukuInduk(student.id)}
+                          className="inline-flex items-center space-x-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-xs transition active:scale-95 cursor-pointer"
+                          title={`Buka lembar Buku Induk register untuk siswa ${student.nama}`}
+                        >
+                          <BookMarked className="w-3.5 h-3.5" />
+                          <span>Buka di Buku Induk</span>
+                          <ArrowRight className="w-3 h-3 ml-0.5" />
+                        </button>
+                      )}
+                    </div>
                     {/* LEMBAR 1: COVER RAPOR (1 Lembar Utuh Kertas F4) */}
                     {(printMode === "full" || printMode === "cover") && (
                       <div className="raport-f4-page raport-f4-cover bg-white text-black p-6 sm:p-10 rounded-2xl shadow-xl border border-slate-300 mx-auto w-full max-w-[215mm] min-h-[330mm] box-border mb-10 print:mb-0 print:p-0 print:shadow-none print:border-none print:w-[195mm] print:max-w-[195mm] print:h-[314mm] print:max-h-[314mm] print:overflow-hidden print:rounded-none">
@@ -3249,6 +3569,24 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
                               <span>:</span>
                               <span className="font-semibold text-slate-800">{student.kelas} / {studentRaport.fase}</span>
                             </div>
+                            {biRecord?.pesertaDidik?.tempatLahir && biRecord?.pesertaDidik?.tanggalLahir && (
+                              <div className="grid grid-cols-[130px_12px_1fr] items-baseline">
+                                <span className="font-semibold text-slate-600">Tempat, Tgl Lahir</span>
+                                <span>:</span>
+                                <span className="font-semibold text-slate-800">
+                                  {biRecord.pesertaDidik.tempatLahir}, {formatTanggalIndonesia(biRecord.pesertaDidik.tanggalLahir)}
+                                </span>
+                              </div>
+                            )}
+                            {(biRecord?.orangTuaWali?.namaAyah || biRecord?.orangTuaWali?.namaIbu) && (
+                              <div className="grid grid-cols-[130px_12px_1fr] items-baseline">
+                                <span className="font-semibold text-slate-600">Nama Orang Tua</span>
+                                <span>:</span>
+                                <span className="font-semibold text-slate-800">
+                                  {biRecord.orangTuaWali.namaAyah || biRecord.orangTuaWali.namaIbu}
+                                </span>
+                              </div>
+                            )}
                             <div className="grid grid-cols-[130px_12px_1fr] items-baseline">
                               <span className="font-semibold text-slate-600">Nama Sekolah</span>
                               <span>:</span>
@@ -3259,6 +3597,15 @@ export const CetakRaportView: React.FC<CetakRaportViewProps> = ({
                               <span>:</span>
                               <span className="font-semibold text-slate-800">{config.NPSN || "20200889"}</span>
                             </div>
+                            {(biRecord?.pesertaDidik?.alamat || biRecord?.orangTuaWali?.alamatOrangTua) && (
+                              <div className="grid grid-cols-[130px_12px_1fr] items-baseline">
+                                <span className="font-semibold text-slate-600">Alamat Siswa</span>
+                                <span>:</span>
+                                <span className="font-normal text-slate-700 truncate">
+                                  {biRecord.pesertaDidik?.alamat || biRecord.orangTuaWali?.alamatOrangTua}
+                                </span>
+                              </div>
+                            )}
                           </div>
 
                           {/* Footer Cover */}

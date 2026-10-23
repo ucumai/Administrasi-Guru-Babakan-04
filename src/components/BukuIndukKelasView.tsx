@@ -26,7 +26,10 @@ import {
   Upload,
   X,
   AlertTriangle,
-  AlertCircle
+  AlertCircle,
+  RefreshCw,
+  ExternalLink,
+  ArrowRight
 } from "lucide-react";
 import { formatTanggalIndonesia } from "./CetakRaportView";
 
@@ -52,9 +55,10 @@ import {
   User,
   NilaiMapelRaport,
   EkstrakurikulerItem,
-  PrestasiItem 
+  PrestasiItem,
+  RaportRecord
 } from "../types";
-import { saveDocument, batchSaveDocuments, COLLECTIONS } from "../lib/firebase";
+import { saveDocument, batchSaveDocuments, getDocument, COLLECTIONS } from "../lib/firebase";
 import { getAllowedClasses } from "../lib/accessControl";
 
 interface BukuIndukKelasViewProps {
@@ -65,6 +69,8 @@ interface BukuIndukKelasViewProps {
   logAbsensiList: LogAbsensi[];
   config: Pengaturan;
   currentUser?: User | null;
+  initialSelectedSiswaId?: string | null;
+  onNavigateToRaport?: (siswaId?: string, kelas?: string) => void;
 }
 
 export const BukuIndukKelasView: React.FC<BukuIndukKelasViewProps> = ({
@@ -74,7 +80,9 @@ export const BukuIndukKelasView: React.FC<BukuIndukKelasViewProps> = ({
   dataNilaiList,
   logAbsensiList,
   config,
-  currentUser
+  currentUser,
+  initialSelectedSiswaId,
+  onNavigateToRaport
 }) => {
   const allowedClasses = getAllowedClasses(currentUser);
   const isAdmin = currentUser?.role === "admin";
@@ -94,6 +102,17 @@ export const BukuIndukKelasView: React.FC<BukuIndukKelasViewProps> = ({
   const [isImporting, setIsImporting] = useState(false);
   const [showPrintModal, setShowPrintModal] = useState(false);
   const [missingFields, setMissingFields] = useState<IncompleteItem[]>([]);
+
+  // Respond to cross-navigation from Cetak Raport
+  useEffect(() => {
+    if (initialSelectedSiswaId) {
+      setSelectedSiswaId(initialSelectedSiswaId);
+      const student = siswaList.find((s) => s.id === initialSelectedSiswaId);
+      if (student && student.kelas) {
+        setSelectedKelas(student.kelas);
+      }
+    }
+  }, [initialSelectedSiswaId, siswaList]);
 
   // Filter students by selected class and search term
   const filteredSiswa = siswaList.filter((s) => {
@@ -309,7 +328,7 @@ export const BukuIndukKelasView: React.FC<BukuIndukKelasViewProps> = ({
     setIsSaved(false);
   };
 
-  // Save to Firestore
+  // Save to Firestore & Mirror to Raport Records
   const handleSaveBukuInduk = async () => {
     if (!formData) return;
     try {
@@ -332,11 +351,178 @@ export const BukuIndukKelasView: React.FC<BukuIndukKelasViewProps> = ({
         await saveDocument(COLLECTIONS.SISWA, selectedSiswa.id, updatedSiswaPayload);
       }
 
+      // Sync to COLLECTIONS.RAPORT_RECORDS
+      if (selectedSiswa && payload.raport) {
+        const cleanTahun = (payload.raport.tahunPelajaran || config.Tahun_Ajaran || "2024/2025").replace(/\//g, "-");
+        const activePeriode = payload.raport.semester === "Genap" ? "pas_genap" : "pas_ganjil";
+        const primaryDocId = `raport_${selectedSiswa.id}_${cleanTahun}_${activePeriode}`;
+        const altDocId1 = `raport_${selectedSiswa.id}_${activePeriode}_${cleanTahun}`;
+        const altDocId2 = `raport_${selectedSiswa.id}_${activePeriode}`;
+
+        const convertedRaportRecord: RaportRecord = {
+          id: primaryDocId,
+          idSiswa: selectedSiswa.id,
+          nisn: payload.nisn || selectedSiswa.nisn || "",
+          nis: payload.nis || selectedSiswa.nis,
+          namaSiswa: payload.pesertaDidik.namaLengkap || selectedSiswa.nama,
+          kelas: payload.kelas || selectedSiswa.kelas,
+          fase: (payload.kelas || "").includes("1") || (payload.kelas || "").includes("2") ? "A" : ((payload.kelas || "").includes("3") || (payload.kelas || "").includes("4") ? "B" : "C"),
+          periode: activePeriode as any,
+          periodeNama: activePeriode === "pas_genap" ? "Penilaian Akhir Tahun (PAT) - Semester Genap" : "Penilaian Akhir Semester (PAS) - Semester Ganjil",
+          semester: (payload.raport.semester as any) || "Ganjil",
+          tahunAjaran: payload.raport.tahunPelajaran || config.Tahun_Ajaran || "2024/2025",
+          tanggalRaport: payload.raport.tanggalRaport || payload.raport.tanggalKenaikan || new Date().toISOString().split("T")[0],
+          tempatTitimangsa: payload.raport.tempatTitimangsa || config.Tempat_Tanda_Tangan || "Kab. Bogor",
+          nilaiMapel: (payload.raport.nilaiPengetahuan || []).map((np) => ({
+            mapel: np.namaMapel,
+            kktp: np.kktp ?? 75,
+            nilaiAkhir: np.nilai,
+            capaianKompetensiTinggi: np.deskripsi,
+            deskripsi: np.deskripsi
+          })),
+          ekskul: (payload.raport.nilaiEkstrakurikuler || []).map((e) => ({
+            nama: e.namaEskul,
+            predikat: e.keteranganPredikat?.split("-")[0]?.trim() || "A",
+            keterangan: e.keteranganPredikat || ""
+          })),
+          prestasi: (payload.raport.nilaiPrestasi || []).map((p) => ({
+            jenis: p.jenisPrestasi,
+            keterangan: p.keterangan
+          })),
+          kehadiran: {
+            sakit: Number(payload.raport.sakit) || 0,
+            izin: Number(payload.raport.izin) || 0,
+            alpa: Number(payload.raport.alpa) || 0
+          },
+          catatanWaliKelas: payload.raport.catatanWaliKelas || "",
+          statusKenaikan: {
+            status: (payload.raport.statusKenaikan as any) || "Belum Ditentukan",
+            keKelas: payload.raport.keKelas || selectedSiswa.kelas,
+            tanggalKenaikan: payload.raport.tanggalKenaikan
+          },
+          updatedAt: Date.now()
+        };
+
+        await saveDocument(COLLECTIONS.RAPORT_RECORDS, primaryDocId, convertedRaportRecord as any);
+        await saveDocument(COLLECTIONS.RAPORT_RECORDS, altDocId1, convertedRaportRecord as any);
+
+        // Update local storage cache for CetakRaportView
+        try {
+          const cached = localStorage.getItem("edadmin_persisted_raport_records");
+          const map = cached ? JSON.parse(cached) : {};
+          map[primaryDocId] = convertedRaportRecord;
+          map[altDocId1] = convertedRaportRecord;
+          map[altDocId2] = convertedRaportRecord;
+          localStorage.setItem("edadmin_persisted_raport_records", JSON.stringify(map));
+        } catch {}
+      }
+
       setIsSaved(true);
       setTimeout(() => setIsSaved(false), 3000);
-      alert(`Buku Induk & Raport untuk "${formData.pesertaDidik.namaLengkap}" berhasil disimpan!`);
+      alert(`Buku Induk & Raport untuk "${formData.pesertaDidik.namaLengkap}" berhasil disimpan & disinkronkan ke modul Cetak Raport!`);
     } catch (err) {
       alert("Gagal menyimpan data Buku Induk: " + err);
+    }
+  };
+
+  // Pull Latest Nilai & Raport from Cetak Raport Module
+  const handlePullFromCetakRaport = async () => {
+    if (!selectedSiswa) {
+      alert("Silakan pilih siswa terlebih dahulu.");
+      return;
+    }
+
+    try {
+      const cleanTahun = (formData?.raport?.tahunPelajaran || config.Tahun_Ajaran || "2024/2025").replace(/\//g, "-");
+      const activeSem = formData?.raport?.semester === "Genap" ? "pas_genap" : "pas_ganjil";
+      const primaryDocId = `raport_${selectedSiswa.id}_${cleanTahun}_${activeSem}`;
+      const altDocId1 = `raport_${selectedSiswa.id}_${activeSem}_${cleanTahun}`;
+      const altDocId2 = `raport_${selectedSiswa.id}_${activeSem}`;
+
+      let foundRecord: RaportRecord | null = null;
+
+      // 1. Check local storage cache from CetakRaportView
+      try {
+        const cached = localStorage.getItem("edadmin_persisted_raport_records");
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          foundRecord = parsed[primaryDocId] || parsed[altDocId1] || parsed[altDocId2] || null;
+          if (!foundRecord) {
+            const matchingKey = Object.keys(parsed).find((k) => k.startsWith(`raport_${selectedSiswa.id}_`));
+            if (matchingKey) foundRecord = parsed[matchingKey];
+          }
+        }
+      } catch {}
+
+      // 2. If not in cache, fetch from Firestore COLLECTIONS.RAPORT_RECORDS
+      if (!foundRecord) {
+        const snap = await getDocument<RaportRecord>(COLLECTIONS.RAPORT_RECORDS, primaryDocId);
+        if (snap && snap.nilaiMapel && snap.nilaiMapel.length > 0) {
+          foundRecord = snap;
+        } else {
+          const snapAlt = await getDocument<RaportRecord>(COLLECTIONS.RAPORT_RECORDS, altDocId1);
+          if (snapAlt && snapAlt.nilaiMapel && snapAlt.nilaiMapel.length > 0) {
+            foundRecord = snapAlt;
+          }
+        }
+      }
+
+      if (!foundRecord || !foundRecord.nilaiMapel || foundRecord.nilaiMapel.length === 0) {
+        alert(`Belum ditemukan data raport tersimpan di modul Cetak Raport untuk "${selectedSiswa.nama}". Silakan simpan nilai di menu Cetak Raport terlebih dahulu.`);
+        return;
+      }
+
+      // Convert foundRecord to RaportSiswaData
+      const numGrades: NilaiMapelRaport[] = (foundRecord.nilaiMapel || []).map((nm) => {
+        const numVal = Number(nm.nilaiAkhir) || 0;
+        let predikat = "B";
+        if (numVal >= 90) predikat = "A";
+        else if (numVal >= 80) predikat = "B";
+        else if (numVal >= 70) predikat = "C";
+        else if (numVal > 0) predikat = "D";
+        return {
+          namaMapel: nm.mapel,
+          kktp: nm.kktp ?? 75,
+          nilai: nm.nilaiAkhir,
+          predikat,
+          deskripsi: nm.capaianKompetensiTinggi || nm.deskripsi || ""
+        };
+      });
+
+      const updatedRaport: any = {
+        semester: foundRecord.semester || (foundRecord.periode?.includes("genap") ? "Genap" : "Ganjil"),
+        tahunPelajaran: foundRecord.tahunAjaran || formData?.raport?.tahunPelajaran || "2024/2025",
+        nilaiPengetahuan: numGrades.length > 0 ? numGrades : (formData?.raport?.nilaiPengetahuan || []),
+        nilaiEkstrakurikuler: (foundRecord.ekskul && foundRecord.ekskul.length > 0)
+          ? foundRecord.ekskul.map((e, idx) => ({
+              id: `esk_${idx + 1}`,
+              namaEskul: e.nama,
+              keteranganPredikat: `${e.predikat}${e.keterangan ? ' - ' + e.keterangan : ''}`
+            }))
+          : (formData?.raport?.nilaiEkstrakurikuler || []),
+        nilaiPrestasi: (foundRecord.prestasi && foundRecord.prestasi.length > 0)
+          ? foundRecord.prestasi.map((p, idx) => ({
+              id: `prs_${idx + 1}`,
+              jenisPrestasi: p.jenis,
+              keterangan: p.keterangan
+            }))
+          : (formData?.raport?.nilaiPrestasi || []),
+        sakit: foundRecord.kehadiran?.sakit ?? formData?.raport?.sakit ?? 0,
+        izin: foundRecord.kehadiran?.izin ?? formData?.raport?.izin ?? 0,
+        alpa: foundRecord.kehadiran?.alpa ?? formData?.raport?.alpa ?? 0,
+        catatanWaliKelas: foundRecord.catatanWaliKelas || formData?.raport?.catatanWaliKelas || "",
+        statusKenaikan: foundRecord.statusKenaikan?.status || formData?.raport?.statusKenaikan || "Belum Ditentukan",
+        keKelas: foundRecord.statusKenaikan?.keKelas || formData?.raport?.keKelas || selectedSiswa.kelas,
+        tanggalKenaikan: foundRecord.statusKenaikan?.tanggalKenaikan || formData?.raport?.tanggalKenaikan || new Date().toISOString().split("T")[0],
+        tanggalRaport: foundRecord.tanggalRaport,
+        tempatTitimangsa: foundRecord.tempatTitimangsa
+      };
+
+      updateNestedField(["raport"], updatedRaport);
+
+      alert(`Berhasil menarik data nilai raport untuk "${selectedSiswa.nama}" (${numGrades.length} mata pelajaran, presensi & ekskul) langsung dari modul Cetak Raport!`);
+    } catch (err: any) {
+      alert("Gagal menarik data dari Cetak Raport: " + (err?.message || err));
     }
   };
 
@@ -912,6 +1098,18 @@ export const BukuIndukKelasView: React.FC<BukuIndukKelasViewProps> = ({
 
           {selectedSiswa && (
             <>
+              {onNavigateToRaport && (
+                <button
+                  type="button"
+                  onClick={() => onNavigateToRaport(selectedSiswa.id, selectedSiswa.kelas)}
+                  className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-2xl flex items-center space-x-1.5 transition-all shadow-xs cursor-pointer active:scale-95"
+                  title={`Buka Lembar Raport resmi untuk ${selectedSiswa.nama}`}
+                >
+                  <Printer className="w-4 h-4" />
+                  <span>Cetak Raport</span>
+                </button>
+              )}
+
               <button
                 onClick={handleSaveBukuInduk}
                 className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-2xl flex items-center space-x-1.5 transition-all shadow-md active:scale-95 cursor-pointer"
@@ -1883,7 +2081,32 @@ export const BukuIndukKelasView: React.FC<BukuIndukKelasViewProps> = ({
                             Lembar Raport Hasil Belajar Siswa Terintegrasi Nilai Pengetahuan, Ekstrakurikuler, Prestasi & Presensi
                           </p>
                         </div>
-                        <div className="flex items-center space-x-2 text-xs">
+                        <div className="flex flex-wrap items-center gap-2 text-xs">
+                          {/* Tombol Tarik Nilai dari Cetak Raport */}
+                          <button
+                            type="button"
+                            onClick={handlePullFromCetakRaport}
+                            className="inline-flex items-center space-x-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs shadow-xs transition active:scale-95 cursor-pointer"
+                            title="Tarik nilai capaian, presensi dan ekstrakurikuler terbaru dari modul Cetak Raport"
+                          >
+                            <RefreshCw className="w-3.5 h-3.5" />
+                            <span>Tarik Nilai dari Cetak Raport</span>
+                          </button>
+
+                          {/* Tombol Buka di Cetak Raport */}
+                          {onNavigateToRaport && selectedSiswa && (
+                            <button
+                              type="button"
+                              onClick={() => onNavigateToRaport(selectedSiswa.id, selectedSiswa.kelas)}
+                              className="inline-flex items-center space-x-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs shadow-xs transition active:scale-95 cursor-pointer"
+                              title="Buka modul cetak raport resmi Kurikulum Merdeka untuk siswa ini"
+                            >
+                              <Printer className="w-3.5 h-3.5" />
+                              <span>Cetak Raport Siswa</span>
+                              <ExternalLink className="w-3 h-3 ml-0.5" />
+                            </button>
+                          )}
+
                           <select
                             value={formData.raport.semester}
                             onChange={(e) => updateNestedField(["raport", "semester"], e.target.value)}

@@ -600,6 +600,32 @@ export async function deleteDocument(collectionName: string, id: string) {
   }
 }
 
+// Get single document with cache fallback
+export async function getDocument<T = any>(collectionName: string, id: string): Promise<T | null> {
+  const cacheKey = `edadmin_cache_${collectionName}`;
+  try {
+    const cached = localStorage.getItem(cacheKey);
+    if (cached) {
+      const list = JSON.parse(cached);
+      if (Array.isArray(list)) {
+        const found = list.find((item: any) => item.id === id);
+        if (found) return found as T;
+      }
+    }
+  } catch {}
+
+  try {
+    const docRef = doc(firestore, collectionName, id);
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      return snap.data() as T;
+    }
+  } catch (e) {
+    console.warn(`Error fetching document ${collectionName}/${id}:`, e);
+  }
+  return null;
+}
+
 // Batch Save Documents to Multiple Collections with local cache mirror (if applicable)
 export async function batchSaveToMultipleCollections(
   operations: Array<{ collectionName: string; id: string; data: Record<string, any> }>
