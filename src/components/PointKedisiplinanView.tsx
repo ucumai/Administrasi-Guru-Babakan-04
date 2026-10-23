@@ -26,7 +26,11 @@ import {
   Filter, 
   Settings, 
   RefreshCw,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Pencil,
+  Upload,
+  X,
+  Save
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import jsPDF from "jspdf";
@@ -824,7 +828,7 @@ export const PointKedisiplinanView: React.FC<PointKedisiplinanViewProps> = ({
   };
 
   // =========================================================================
-  // MASTER TATA TERTIB MANAGEMENT
+  // MASTER TATA TERTIB MANAGEMENT (CRUD + EXCEL TEMPLATE & IMPORT)
   // =========================================================================
   const [newAturanNama, setNewAturanNama] = useState<string>("");
   const [newAturanJenis, setNewAturanJenis] = useState<"pelanggaran" | "apresiasi">("pelanggaran");
@@ -832,6 +836,19 @@ export const PointKedisiplinanView: React.FC<PointKedisiplinanViewProps> = ({
   const [newAturanPoint, setNewAturanPoint] = useState<number>(5);
   const [newAturanKet, setNewAturanKet] = useState<string>("");
 
+  // Edit Modal State
+  const [editingAturan, setEditingAturan] = useState<TataTertibItem | null>(null);
+  const [editNama, setEditNama] = useState<string>("");
+  const [editJenis, setEditJenis] = useState<"pelanggaran" | "apresiasi">("pelanggaran");
+  const [editPoint, setEditPoint] = useState<number>(5);
+  const [editKet, setEditKet] = useState<string>("");
+
+  // Search & Filter State in Catalogue
+  const [aturanSearchQuery, setAturanSearchQuery] = useState<string>("");
+  const [aturanFilterJenis, setAturanFilterJenis] = useState<"all" | "pelanggaran" | "apresiasi">("all");
+  const excelFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Add Single Rule
   const handleAddAturan = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newAturanNama.trim()) return;
@@ -843,7 +860,7 @@ export const PointKedisiplinanView: React.FC<PointKedisiplinanViewProps> = ({
       nama: newAturanNama.trim(),
       jenis: newAturanJenis,
       kategori: newAturanKategori,
-      pointDefault: Number(newAturanPoint),
+      pointDefault: Number(newAturanPoint) || 1,
       keteranganDefault: newAturanKet.trim(),
       updatedAt: Date.now()
     };
@@ -862,20 +879,244 @@ export const PointKedisiplinanView: React.FC<PointKedisiplinanViewProps> = ({
     }
   };
 
-  const handleDeleteAturan = async (id: string) => {
-    const isConfirmed = await confirmDeleteAlert("Hapus Aturan Ini?", "Aturan ini akan dihapus dari katalog tata tertib.");
+  // Open Edit Modal
+  const handleStartEditAturan = (item: TataTertibItem) => {
+    setEditingAturan(item);
+    setEditNama(item.nama);
+    setEditJenis(item.jenis);
+    setEditPoint(item.pointDefault);
+    setEditKet(item.keteranganDefault || "");
+  };
+
+  // Save Edited Rule
+  const handleSaveEditAturan = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingAturan || !editNama.trim()) return;
+
+    const updatedItem: TataTertibItem = {
+      ...editingAturan,
+      nama: editNama.trim(),
+      jenis: editJenis,
+      kategori: editingAturan.kategori || (editJenis === "pelanggaran" ? "ringan" : "prestasi"),
+      pointDefault: Number(editPoint) || 1,
+      keteranganDefault: editKet.trim(),
+      updatedAt: Date.now()
+    };
+
+    try {
+      await saveDocument(COLLECTIONS.TATA_TERTIB, editingAturan.id, updatedItem as any);
+      const updatedList = tataTertibList.map((t) => (t.id === editingAturan.id ? updatedItem : t));
+      setTataTertibList(updatedList);
+      try {
+        localStorage.setItem("edadmin_master_tata_tertib", JSON.stringify(updatedList));
+      } catch {}
+
+      setEditingAturan(null);
+      notifySimpanSuccess("Aturan tata tertib berhasil diperbarui!");
+    } catch (err: any) {
+      notifySimpanError(err?.message || "Gagal memperbarui aturan.");
+    }
+  };
+
+  // Delete Rule (For any item in catalogue)
+  const handleDeleteAturan = async (item: TataTertibItem) => {
+    const isConfirmed = await confirmDeleteAlert(
+      "Hapus Aturan Ini?",
+      `Apakah Anda yakin ingin menghapus aturan "${item.nama}" (${item.jenis === "pelanggaran" ? "Pelanggaran -" + item.pointDefault : "Apresiasi +" + item.pointDefault} Poin) dari katalog tata tertib?`
+    );
     if (!isConfirmed) return;
 
     try {
-      await deleteDocument(COLLECTIONS.TATA_TERTIB, id);
-      const updated = tataTertibList.filter((t) => t.id !== id);
+      await deleteDocument(COLLECTIONS.TATA_TERTIB, item.id);
+      const updated = tataTertibList.filter((t) => t.id !== item.id);
       setTataTertibList(updated);
       try { localStorage.setItem("edadmin_master_tata_tertib", JSON.stringify(updated)); } catch {}
-      showToastSuccess("Aturan berhasil dihapus!");
+      showToastSuccess(`Aturan "${item.nama}" berhasil dihapus!`);
     } catch (err) {
       notifySimpanError("Gagal menghapus aturan.");
     }
   };
+
+  // Download Excel Template for Bulk Adding Rules
+  const handleDownloadTemplateExcel = () => {
+    try {
+      const wb = XLSX.utils.book_new();
+      const headers = [
+        "No",
+        "Nama Aturan / Pelanggaran / Apresiasi",
+        "Jenis (Pelanggaran / Apresiasi)",
+        "Bobot Poin",
+        "Keterangan / Saran Pembinaan Default"
+      ];
+
+      const sampleRows = [
+        [
+          1,
+          "Datang terlambat masuk sekolah / kelas",
+          "Pelanggaran",
+          5,
+          "Diberi pembinaan disiplin waktu pagi"
+        ],
+        [
+          2,
+          "Seragam tidak lengkap atau atribut tidak rapi",
+          "Pelanggaran",
+          5,
+          "Ditegur dan diminta melengkapi atribut seragam"
+        ],
+        [
+          3,
+          "Tidak mengerjakan tugas sekolah / PR",
+          "Pelanggaran",
+          10,
+          "Bimbingan wali kelas dan penugasan mandiri terstruktur"
+        ],
+        [
+          4,
+          "Meraih juara lomba akademik / non-akademik tingkat kecamatan/kabupaten",
+          "Apresiasi",
+          25,
+          "Piagam apresiasi dan penambahan poin prestasi"
+        ],
+        [
+          5,
+          "Kehadiran 100% tepat waktu selama 1 bulan penuh",
+          "Apresiasi",
+          15,
+          "Penghargaan atas komitmen disiplin kehadiran"
+        ],
+        [
+          6,
+          "Menunjukkan kejujuran tinggi dan mengembalikan barang/uang temuan",
+          "Apresiasi",
+          20,
+          "Apresiasi keteladanan integritas karakter"
+        ]
+      ];
+
+      const ws = XLSX.utils.aoa_to_sheet([headers, ...sampleRows]);
+      ws["!cols"] = [
+        { wch: 6 },
+        { wch: 50 },
+        { wch: 30 },
+        { wch: 14 },
+        { wch: 50 }
+      ];
+
+      XLSX.utils.book_append_sheet(wb, ws, "TEMPLATE_TATA_TERTIB");
+      XLSX.writeFile(wb, "Template_Tata_Tertib_Sekolah.xlsx");
+      showToastSuccess("Template Excel berhasil diunduh!");
+    } catch (err: any) {
+      notifySimpanError("Gagal mengunduh template Excel.");
+    }
+  };
+
+  // Upload Excel for Bulk Import of Rules
+  const handleUploadExcelAturan = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      try {
+        const bstr = evt.target?.result;
+        const wb = XLSX.read(bstr, { type: "binary" });
+        const wsName = wb.SheetNames[0];
+        const ws = wb.Sheets[wsName];
+        const data: any[] = XLSX.utils.sheet_to_json(ws, { header: 1 });
+
+        if (data.length <= 1) {
+          notifySimpanError("File Excel kosong atau hanya berisi baris judul!");
+          return;
+        }
+
+        // Detect column positions from header row
+        const headers: string[] = (data[0] || []).map((h: any) => String(h || "").toLowerCase().trim());
+        
+        let colNama = headers.findIndex((h) => h.includes("nama") || h.includes("aturan") || h.includes("pelanggaran"));
+        let colJenis = headers.findIndex((h) => h.includes("jenis") || h.includes("tipe") || h.includes("tindakan"));
+        let colPoin = headers.findIndex((h) => h.includes("poin") || h.includes("point") || h.includes("bobot"));
+        let colKet = headers.findIndex((h) => h.includes("keterangan") || h.includes("pembinaan") || h.includes("catatan"));
+
+        // Positional defaults if headers aren't explicitly named
+        if (colNama === -1) colNama = 1;
+        if (colJenis === -1) colJenis = 2;
+        if (colPoin === -1) colPoin = 3;
+        if (colKet === -1) colKet = 4;
+
+        const newItems: TataTertibItem[] = [];
+        const nowTs = Date.now();
+
+        for (let i = 1; i < data.length; i++) {
+          const row = data[i];
+          if (!row || row.length === 0) continue;
+
+          const nama = String(row[colNama] || "").trim();
+          if (!nama) continue;
+
+          const jenisRaw = String(row[colJenis] || "").toLowerCase().trim();
+          const jenis: "pelanggaran" | "apresiasi" = 
+            (jenisRaw.includes("apresiasi") || jenisRaw.includes("prestasi") || jenisRaw.includes("+") || jenisRaw.includes("tambah") || jenisRaw.includes("bonus") || jenisRaw.includes("hadiah"))
+              ? "apresiasi"
+              : "pelanggaran";
+
+          const pointRaw = Number(row[colPoin]);
+          const pointDefault = !isNaN(pointRaw) && pointRaw > 0 ? Math.round(pointRaw) : (jenis === "pelanggaran" ? 5 : 10);
+          const keteranganDefault = colKet !== -1 && row[colKet] ? String(row[colKet]).trim() : "";
+
+          newItems.push({
+            id: `tt_import_${nowTs}_${i}`,
+            kode: jenis === "pelanggaran" ? `PLG-${tataTertibList.length + newItems.length + 1}` : `APR-${tataTertibList.length + newItems.length + 1}`,
+            nama,
+            jenis,
+            kategori: jenis === "pelanggaran" ? "ringan" : "prestasi",
+            pointDefault,
+            keteranganDefault,
+            updatedAt: nowTs + i
+          });
+        }
+
+        if (newItems.length === 0) {
+          notifySimpanError("Tidak ditemukan data aturan yang valid untuk diimpor. Pastikan kolom Nama Aturan telah terisi!");
+          return;
+        }
+
+        // 1. Batch save to Firestore
+        await batchSaveDocuments(COLLECTIONS.TATA_TERTIB, newItems);
+
+        // 2. Merge into state and localStorage
+        const updated = [...tataTertibList, ...newItems];
+        setTataTertibList(updated);
+        try {
+          localStorage.setItem("edadmin_master_tata_tertib", JSON.stringify(updated));
+        } catch {}
+
+        notifySimpanSuccess(`Berhasil mengimpor ${newItems.length} aturan tata tertib baru dari file Excel!`);
+      } catch (err: any) {
+        notifySimpanError(err?.message || "Gagal memproses file Excel. Pastikan format tabel sesuai template!");
+      } finally {
+        if (e.target) e.target.value = "";
+      }
+    };
+
+    reader.readAsBinaryString(file);
+  };
+
+  // Filtered Catalogue Rules (Search & Category Filter)
+  const filteredTataTertibList = useMemo(() => {
+    return tataTertibList.filter((t) => {
+      if (aturanFilterJenis !== "all" && t.jenis !== aturanFilterJenis) {
+        return false;
+      }
+      if (!aturanSearchQuery.trim()) return true;
+      const q = aturanSearchQuery.toLowerCase();
+      return (
+        t.nama.toLowerCase().includes(q) ||
+        (t.keteranganDefault && t.keteranganDefault.toLowerCase().includes(q)) ||
+        (t.kode && t.kode.toLowerCase().includes(q))
+      );
+    });
+  }, [tataTertibList, aturanFilterJenis, aturanSearchQuery]);
 
   // =========================================================================
   // RENDER
@@ -2157,11 +2398,116 @@ export const PointKedisiplinanView: React.FC<PointKedisiplinanViewProps> = ({
 
           {/* List of Existing Rules */}
           <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-700 space-y-4">
-            <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center space-x-2">
-              <Settings className="w-4 h-4 text-indigo-500" />
-              <span>Daftar Katalog Tata Tertib & Apresiasi Sekolah ({tataTertibList.length} Aturan)</span>
-            </h3>
+            {/* Header & Excel Action Toolbar */}
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-3 border-b border-slate-100 dark:border-slate-700">
+              <div className="space-y-1">
+                <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center space-x-2">
+                  <Settings className="w-4 h-4 text-indigo-500" />
+                  <span>Daftar Katalog Tata Tertib & Apresiasi Sekolah</span>
+                  <span className="px-2 py-0.5 rounded-full bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 text-[11px] font-bold">
+                    {tataTertibList.length} Aturan
+                  </span>
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Daftar aturan default & kustom untuk penilaian kedisiplinan. Anda dapat mengubah nama, jenis, poin, menghapus aturan, atau mengimpor massal dari Excel.
+                </p>
+              </div>
 
+              {/* Action Buttons: Excel Template & Upload */}
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleDownloadTemplateExcel}
+                  className="inline-flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-650 text-slate-700 dark:text-slate-200 text-xs font-bold transition shadow-xs cursor-pointer active:scale-95"
+                  title="Unduh format template Excel untuk menambahkan aturan secara masal"
+                >
+                  <Download className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                  <span>Unduh Template Excel</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => excelFileInputRef.current?.click()}
+                  className="inline-flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition shadow-xs cursor-pointer active:scale-95"
+                  title="Upload file Excel yang sudah diisi untuk menambahkan aturan secara masal"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>Upload Excel (Impor Masal)</span>
+                </button>
+
+                {/* Hidden File Input for Excel Import */}
+                <input
+                  type="file"
+                  ref={excelFileInputRef}
+                  accept=".xlsx, .xls"
+                  onChange={handleUploadExcelAturan}
+                  className="hidden"
+                />
+              </div>
+            </div>
+
+            {/* Search and Category Filter */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-1">
+              {/* Search Box */}
+              <div className="relative flex-1">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={aturanSearchQuery}
+                  onChange={(e) => setAturanSearchQuery(e.target.value)}
+                  placeholder="Cari nama aturan, pelanggaran, atau pembinaan..."
+                  className="w-full text-xs font-semibold pl-8 pr-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-750 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                {aturanSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setAturanSearchQuery("")}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
+
+              {/* Filter Pills */}
+              <div className="flex items-center space-x-1.5 self-start sm:self-auto bg-slate-100 dark:bg-slate-750 p-1 rounded-xl">
+                <button
+                  type="button"
+                  onClick={() => setAturanFilterJenis("all")}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                    aturanFilterJenis === "all"
+                      ? "bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-xs"
+                      : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
+                  }`}
+                >
+                  Semua ({tataTertibList.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAturanFilterJenis("pelanggaran")}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                    aturanFilterJenis === "pelanggaran"
+                      ? "bg-rose-600 text-white shadow-xs"
+                      : "text-slate-600 dark:text-slate-400 hover:text-rose-600"
+                  }`}
+                >
+                  Pelanggaran ({tataTertibList.filter((t) => t.jenis === "pelanggaran").length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAturanFilterJenis("apresiasi")}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                    aturanFilterJenis === "apresiasi"
+                      ? "bg-emerald-600 text-white shadow-xs"
+                      : "text-slate-600 dark:text-slate-400 hover:text-emerald-600"
+                  }`}
+                >
+                  Apresiasi ({tataTertibList.filter((t) => t.jenis === "apresiasi").length})
+                </button>
+              </div>
+            </div>
+
+            {/* Table of Rules */}
             <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
@@ -2171,54 +2517,183 @@ export const PointKedisiplinanView: React.FC<PointKedisiplinanViewProps> = ({
                     <th className="p-3 text-center w-28">Jenis</th>
                     <th className="p-3 text-center w-24">Bobot</th>
                     <th className="p-3">Keterangan / Pembinaan Default</th>
-                    <th className="p-3 text-center w-20">Aksi</th>
+                    <th className="p-3 text-center w-28">Aksi</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-700 text-slate-700 dark:text-slate-300">
-                  {tataTertibList.map((t, idx) => (
-                    <tr key={t.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-750/50">
-                      <td className="p-3 text-center font-semibold">{idx + 1}</td>
-                      <td className="p-3 font-bold text-slate-900 dark:text-slate-100">
-                        {t.nama}
-                      </td>
-                      <td className="p-3 text-center">
-                        <span
-                          className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                            t.jenis === "pelanggaran"
-                              ? "bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-300"
-                              : "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300"
-                          }`}
-                        >
-                          {t.jenis === "pelanggaran" ? "Pelanggaran" : "Apresiasi"}
-                        </span>
-                      </td>
-                      <td className="p-3 text-center font-black">
-                        <span className={t.jenis === "pelanggaran" ? "text-rose-600" : "text-emerald-600"}>
-                          {t.jenis === "pelanggaran" ? `-${t.pointDefault}` : `+${t.pointDefault}`} Poin
-                        </span>
-                      </td>
-                      <td className="p-3 text-slate-500 text-[11px] italic">
-                        {t.keteranganDefault || "-"}
-                      </td>
-                      <td className="p-3 text-center">
-                        {t.id.startsWith("tt_custom_") ? (
-                          <button
-                            onClick={() => handleDeleteAturan(t.id)}
-                            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition"
-                            title="Hapus aturan kustom ini"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        ) : (
-                          <span className="text-[10px] text-slate-400">Standar</span>
-                        )}
+                  {filteredTataTertibList.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="p-6 text-center text-slate-400 italic">
+                        {aturanSearchQuery 
+                          ? `Tidak ditemukan aturan yang sesuai dengan kata kunci "${aturanSearchQuery}".`
+                          : "Belum ada aturan tata tertib dalam kategori ini."}
                       </td>
                     </tr>
-                  ))}
+                  ) : (
+                    filteredTataTertibList.map((t, idx) => (
+                      <tr key={t.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-750/50 transition-colors">
+                        <td className="p-3 text-center font-semibold text-slate-500">{idx + 1}</td>
+                        <td className="p-3 font-bold text-slate-900 dark:text-slate-100">
+                          {t.nama}
+                        </td>
+                        <td className="p-3 text-center">
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                              t.jenis === "pelanggaran"
+                                ? "bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300"
+                                : "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
+                            }`}
+                          >
+                            {t.jenis === "pelanggaran" ? "Pelanggaran (-)" : "Apresiasi (+)"}
+                          </span>
+                        </td>
+                        <td className="p-3 text-center font-black">
+                          <span className={t.jenis === "pelanggaran" ? "text-rose-600" : "text-emerald-600"}>
+                            {t.jenis === "pelanggaran" ? `-${t.pointDefault}` : `+${t.pointDefault}`} Poin
+                          </span>
+                        </td>
+                        <td className="p-3 text-slate-500 text-[11px] italic">
+                          {t.keteranganDefault || "-"}
+                        </td>
+                        <td className="p-3 text-center">
+                          <div className="flex items-center justify-center space-x-1">
+                            {/* Edit Button */}
+                            <button
+                              type="button"
+                              onClick={() => handleStartEditAturan(t)}
+                              className="p-1.5 rounded-lg text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950/40 transition cursor-pointer"
+                              title="Edit nama aturan, jenis, dan poin"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+
+                            {/* Delete Button */}
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteAturan(t)}
+                              className="p-1.5 rounded-lg text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/40 transition cursor-pointer"
+                              title="Hapus aturan dari katalog"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
           </div>
+
+          {/* ========================================================================= */}
+          {/* MODAL EDIT ATURAN TATA TERTIB */}
+          {/* ========================================================================= */}
+          {editingAturan && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+              <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 max-w-lg w-full shadow-2xl border border-slate-200 dark:border-slate-700 space-y-4">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-700">
+                  <div className="flex items-center space-x-2">
+                    <div className="p-2 rounded-xl bg-blue-100 dark:bg-blue-950 text-blue-600 dark:text-blue-400">
+                      <Pencil className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-extrabold text-slate-800 dark:text-white">
+                        Edit Aturan Tata Tertib
+                      </h4>
+                      <p className="text-[11px] text-slate-500">
+                        Ubah nama, jenis tindakan, bobot poin, atau saran pembinaan default
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setEditingAturan(null)}
+                    className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <form onSubmit={handleSaveEditAturan} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      Nama Aturan / Pelanggaran / Apresiasi
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={editNama}
+                      onChange={(e) => setEditNama(e.target.value)}
+                      placeholder="Nama aturan tata tertib..."
+                      className="w-full text-xs font-semibold px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-700 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        Jenis Tindakan
+                      </label>
+                      <select
+                        value={editJenis}
+                        onChange={(e) => setEditJenis(e.target.value as any)}
+                        className="w-full text-xs font-semibold px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-700 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="pelanggaran">Pelanggaran (-)</option>
+                        <option value="apresiasi">Apresiasi (+)</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        Bobot Poin Default
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="100"
+                        required
+                        value={editPoint}
+                        onChange={(e) => setEditPoint(parseInt(e.target.value, 10) || 1)}
+                        className="w-full text-xs font-bold px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-700 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      Keterangan / Saran Pembinaan Default (Opsional)
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={editKet}
+                      onChange={(e) => setEditKet(e.target.value)}
+                      placeholder="Contoh: Ditegur lisan dan pembinaan kepribadian"
+                      className="w-full text-xs font-semibold px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-700 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-end space-x-2 pt-3 border-t border-slate-100 dark:border-slate-700">
+                    <button
+                      type="button"
+                      onClick={() => setEditingAturan(null)}
+                      className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-650 text-slate-700 dark:text-slate-300 text-xs font-bold transition cursor-pointer"
+                    >
+                      Batal
+                    </button>
+                    <button
+                      type="submit"
+                      className="inline-flex items-center space-x-1.5 px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-md transition cursor-pointer active:scale-95"
+                    >
+                      <Save className="w-3.5 h-3.5" />
+                      <span>Simpan Perubahan</span>
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
